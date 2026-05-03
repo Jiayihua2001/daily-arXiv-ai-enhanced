@@ -21,59 +21,47 @@ jobs:
         curl -LsSf https://astral.sh/uv/install.sh | sh
         uv sync
         
-    - name: Crawl arXiv papers
+    - name: Fetch papers (arXiv + ChemRxiv + OpenAlex)
       id: crawl_step
       run: |
         source .venv/bin/activate
         today=$(date -u "+%Y-%m-%d")
-        echo "开始爬取 $today 的arXiv论文... / Starting to crawl $today arXiv papers..."
-        
-        # 检查今日文件是否已存在，如存在则删除 / Check if today's file exists, delete if found
-        if [ -f "data/${today}.jsonl" ]; then
-            echo "🗑️ 发现今日文件已存在，正在删除重新生成... / Found existing today's file, deleting for fresh start..."
-            rm "data/${today}.jsonl"
-            echo "✅ 已删除现有文件：data/${today}.jsonl / Deleted existing file: data/${today}.jsonl"
-        else
-            echo "📝 今日文件不存在，准备新建... / Today's file doesn't exist, ready to create new one..."
-        fi
-        
-        cd daily_arxiv
-        export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-        export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}"
-        export TOKEN_GITHUB=${{ secrets.TOKEN_GITHUB }}
-        export LANGUAGE="${{ vars.LANGUAGE || 'English' }}"
-        export CATEGORIES="${{ vars.CATEGORIES || 'cond-mat.mtrl-sci, physics.chem-ph, physics.comp-ph, cond-mat.soft, cs.LG, cs.AI, q-bio.BM' }}"
-        export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
+        echo "Fetching $today papers from all sources..."
 
-        # Crawl with full log going to stderr so the GH Actions UI shows it.
-        scrapy crawl arxiv -o ../data/${today}.jsonl --loglevel=INFO 2>&1 | tail -200
+        if [ -f "data/${today}.jsonl" ]; then
+            echo "🗑️ removing stale data/${today}.jsonl"
+            rm "data/${today}.jsonl"
+        fi
+
+        export TOKEN_GITHUB=${{ secrets.TOKEN_GITHUB }}
+        export CATEGORIES="${{ vars.CATEGORIES || 'cond-mat.mtrl-sci, physics.chem-ph, physics.comp-ph, cond-mat.soft, cs.LG, cs.AI, q-bio.BM' }}"
+        export LOOKBACK_DAYS="${{ vars.LOOKBACK_DAYS || '3' }}"
+        export SOURCES="${{ vars.SOURCES || 'arxiv,openalex' }}"
+        export OPENALEX_EMAIL="${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
+
+        cd daily_arxiv
+        python fetch_all.py 2>&1 | tee /tmp/fetch.log
+        rc=${PIPESTATUS[0]}
 
         if [ ! -f "../data/${today}.jsonl" ]; then
-            echo "❌ Crawler did not create the expected output file"
+            echo "❌ Fetcher did not create the expected output file"
             exit 1
         fi
 
         crawl_count=$(wc -l < "../data/${today}.jsonl" | tr -d ' ')
         crawl_size=$(wc -c < "../data/${today}.jsonl" | tr -d ' ')
-        echo "📊 crawl_count=$crawl_count  crawl_size=${crawl_size}B"
-        echo "First 200 chars of crawl output:"
-        head -c 200 "../data/${today}.jsonl"; echo
+        echo "📊 crawl_count=$crawl_count  crawl_size=${crawl_size}B  fetcher_rc=$rc"
         if [ "$crawl_count" -eq 0 ]; then
-            echo "⚠️  Spider produced 0 items. Capturing arxiv listing-page snapshot for diagnosis…"
-            for cat in $(echo "$CATEGORIES" | tr ',' ' '); do
-              cat=$(echo "$cat" | tr -d ' ')
-              echo "--- /list/${cat}/new ---"
-              curl -sSL -A "$(grep USER_AGENT daily_arxiv/settings.py | head -1)" \
-                "https://arxiv.org/list/${cat}/new" \
-                | grep -oE '<title>[^<]*</title>|/abs/[0-9]+\.[0-9]+|No new submissions' \
-                | head -8 || true
-            done
-            echo "❌ Failing the workflow so this is visible in the UI."
+            echo "⚠️  Zero items across all sources. Recent log:"
+            tail -100 /tmp/fetch.log
             exit 1
         fi
 
+        echo "First item (compact):"
+        head -1 "../data/${today}.jsonl" | python -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('source'), d.get('id'), '-', d.get('title','')[:120])"
+
         echo "crawl_date=$today" >> $GITHUB_OUTPUT
-        echo "✅ Crawl completed: $crawl_count items"
+        echo "✅ Fetch completed: $crawl_count items"
         
     - name: Check for duplicates
       id: dedup_check
