@@ -13,7 +13,16 @@ keywords:
   - crystal structure prediction
   - molecular crystal
   - molecular crystals
-  - polymorph                  # catches polymorphism, polymorphs, polymorphic
+  # 'polymorph' alone matches genetic-polymorphism papers (e.g. SNP studies)
+  # so we disambiguate with crystallography-context substrings.
+  - crystal polymorph
+  - polymorph selection
+  - polymorph stability
+  - polymorph prediction
+  - polymorphic transition
+  - polymorphic phase
+  - polymorphic crystal
+  - conformational polymorph
   - co-crystal
   - cocrystal
   - lattice energy

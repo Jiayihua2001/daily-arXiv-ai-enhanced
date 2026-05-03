@@ -167,8 +167,18 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
 
 def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
     """并行处理所有数据项"""
-    llm = ChatOpenAI(model=model_name).with_structured_output(Structure, method="function_calling")
-    print('Connect to:', model_name, file=sys.stderr)
+    # langchain_openai's ChatOpenAI reads OPENAI_API_BASE (not OPENAI_BASE_URL),
+    # so pass base_url explicitly to support DeepSeek/etc. via the canonical
+    # OPENAI_BASE_URL env var that the rest of the repo uses.
+    base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
+    api_key  = os.environ.get("OPENAI_API_KEY")
+    llm_kwargs = {"model": model_name}
+    if base_url:
+        llm_kwargs["base_url"] = base_url
+    if api_key:
+        llm_kwargs["api_key"]  = api_key
+    print(f"Connect to: {model_name} via {base_url or '(default openai.com)'}", file=sys.stderr)
+    llm = ChatOpenAI(**llm_kwargs).with_structured_output(Structure, method="function_calling")
     
     prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(system),

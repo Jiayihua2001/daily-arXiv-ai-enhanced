@@ -22,7 +22,9 @@
       // core MCSP
       'crystal structure prediction',
       'molecular crystal',
-      'polymorph',
+      'crystal polymorph',
+      'polymorph selection',
+      'polymorph stability',
       'co-crystal',
       'lattice energy',
       'structure search',
@@ -57,7 +59,7 @@
     ],
     // Bump the version when the default list changes — existing visitors
     // who haven't customized get migrated to the new list.
-    seedFlag: 'mcsp_defaults_seeded_v3'
+    seedFlag: 'mcsp_defaults_seeded_v4'
   };
 
   // ---- Data-source fallback + topical keyword filter shim ------------------
@@ -223,6 +225,20 @@
     'inverse design','materials discovery','molecular generation',
     'crystal generation'
   ];
+  // v3 had bare 'polymorph' which caught genetic-polymorphism papers.
+  // v4 uses disambiguated 'crystal polymorph' / 'polymorph selection' / etc.
+  const V3_DEFAULTS = [
+    'crystal structure prediction','molecular crystal','polymorph','co-crystal',
+    'lattice energy','structure search','molecular packing','crystal packing',
+    'crystal engineering','space group','pharmaceutical crystal',
+    'metal-organic framework','covalent organic framework','perovskite',
+    'machine learning potential','neural network potential',
+    'interatomic potential','equivariant neural network','inverse design',
+    'materials discovery','molecular generation','crystal generation',
+    'generative chemistry','MACE','NequIP','M3GNet','CHGNet',
+    'density functional theory','ab initio molecular dynamics',
+    'molecular dynamics simulation'
+  ];
   function arraysEqual(a, b) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
     return a.every((v, i) => v === b[i]);
@@ -237,14 +253,15 @@
       const isFresh        = !saved.length;
       const isStockV1      = arraysEqual(saved, V1_DEFAULTS);
       const isStockV2      = arraysEqual(saved, V2_DEFAULTS);
-      const needsMigration = !seedDoneAt && (isFresh || isStockV1 || isStockV2);
+      const isStockV3      = arraysEqual(saved, V3_DEFAULTS);
+      const needsMigration = !seedDoneAt && (isFresh || isStockV1 || isStockV2 || isStockV3);
 
       if (needsMigration) {
         localStorage.setItem('preferredKeywords',
           JSON.stringify(PROFILE.defaultKeywords));
         localStorage.setItem(PROFILE.seedFlag, '1');
-        if (isStockV1 || isStockV2) {
-          console.info(`[personalization] migrated stock keyword list → v3 (broader, ${PROFILE.defaultKeywords.length} terms)`);
+        if (isStockV1 || isStockV2 || isStockV3) {
+          console.info(`[personalization] migrated stock keyword list → v4 (disambiguated polymorph terms; ${PROFILE.defaultKeywords.length} terms)`);
         }
       }
     } catch (e) {

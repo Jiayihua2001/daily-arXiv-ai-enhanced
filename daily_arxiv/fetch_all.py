@@ -80,46 +80,64 @@ def load_keywords() -> list[str]:
 # ============================================================================
 
 def fetch_arxiv() -> list[dict]:
-    """Use the arxiv pip package (export.arxiv.org/api wrapper)."""
+    """Use the arxiv pip package (export.arxiv.org/api wrapper).
+
+    arxiv API rate-limits aggressively (HTTP 429). We use generous retry
+    settings and an outer try-with-cooldown loop in case the first call
+    bounces with a stale rate-limit window.
+    """
+    import time
     import arxiv
 
     cats = [c.strip() for c in os.environ.get("CATEGORIES", DEFAULT_CATEGORIES).split(",") if c.strip()]
     if not cats:
         return []
 
-    client = arxiv.Client(page_size=100, delay_seconds=3.0, num_retries=5)
+    cat_clause = " OR ".join(f"cat:{c}" for c in cats)
     cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
 
-    # Single query for all categories — much faster than one-per-cat.
-    cat_clause = " OR ".join(f"cat:{c}" for c in cats)
-    search = arxiv.Search(
-        query=cat_clause,
-        max_results=600,
-        sort_by=arxiv.SortCriterion.SubmittedDate,
-        sort_order=arxiv.SortOrder.Descending,
-    )
+    def _try_fetch():
+        client = arxiv.Client(page_size=100, delay_seconds=4.0, num_retries=8)
+        search = arxiv.Search(
+            query=cat_clause,
+            max_results=600,
+            sort_by=arxiv.SortCriterion.SubmittedDate,
+            sort_order=arxiv.SortOrder.Descending,
+        )
+        items: list[dict] = []
+        seen: set[str] = set()
+        for paper in client.results(search):
+            if paper.published.replace(tzinfo=timezone.utc) < cutoff:
+                break
+            aid = paper.entry_id.rsplit("/", 1)[-1]
+            if aid in seen:
+                continue
+            seen.add(aid)
+            items.append({
+                "id":         aid,
+                "categories": list(paper.categories),
+                "pdf":        f"https://arxiv.org/pdf/{aid}",
+                "abs":        f"https://arxiv.org/abs/{aid}",
+                "authors":    [a.name for a in paper.authors],
+                "title":      _collapse_ws(paper.title),
+                "comment":    paper.comment,
+                "summary":    _collapse_ws(paper.summary),
+                "source":     "arxiv",
+            })
+        return items
 
-    items: list[dict] = []
-    seen_ids: set[str] = set()
-    for paper in client.results(search):
-        if paper.published.replace(tzinfo=timezone.utc) < cutoff:
-            break
-        aid = paper.entry_id.rsplit("/", 1)[-1]
-        if aid in seen_ids:
-            continue
-        seen_ids.add(aid)
-        items.append({
-            "id":         aid,
-            "categories": list(paper.categories),
-            "pdf":        f"https://arxiv.org/pdf/{aid}",
-            "abs":        f"https://arxiv.org/abs/{aid}",
-            "authors":    [a.name for a in paper.authors],
-            "title":      _collapse_ws(paper.title),
-            "comment":    paper.comment,
-            "summary":    _collapse_ws(paper.summary),
-            "source":     "arxiv",
-        })
-    return items
+    # Outer retry: 3 attempts with 30s/60s cooldown for rate-limit recovery.
+    for attempt in range(3):
+        try:
+            items = _try_fetch()
+            if items:
+                return items
+            print(f"[arxiv] attempt {attempt+1} returned 0 items — cooling down", file=sys.stderr)
+        except Exception as e:
+            print(f"[arxiv] attempt {attempt+1} failed: {e}", file=sys.stderr)
+        if attempt < 2:
+            time.sleep(30 * (attempt + 1))
+    return []
 
 
 # ============================================================================
