@@ -45,18 +45,35 @@ jobs:
         export CATEGORIES="${{ vars.CATEGORIES || 'cond-mat.mtrl-sci, physics.chem-ph, physics.comp-ph, cond-mat.soft, cs.LG, cs.AI, q-bio.BM' }}"
         export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
 
-        # 使用Scrapy爬取
-        # Use Scrapy to crawl
-        scrapy crawl arxiv -o ../data/${today}.jsonl
-        
-        # 检查爬取是否成功 / Check if crawling was successful
+        # Crawl with full log going to stderr so the GH Actions UI shows it.
+        scrapy crawl arxiv -o ../data/${today}.jsonl --loglevel=INFO 2>&1 | tail -200
+
         if [ ! -f "../data/${today}.jsonl" ]; then
-            echo "爬取失败，未生成数据文件 / Crawling failed, no data file generated"
+            echo "❌ Crawler did not create the expected output file"
             exit 1
         fi
-        
+
+        crawl_count=$(wc -l < "../data/${today}.jsonl" | tr -d ' ')
+        crawl_size=$(wc -c < "../data/${today}.jsonl" | tr -d ' ')
+        echo "📊 crawl_count=$crawl_count  crawl_size=${crawl_size}B"
+        echo "First 200 chars of crawl output:"
+        head -c 200 "../data/${today}.jsonl"; echo
+        if [ "$crawl_count" -eq 0 ]; then
+            echo "⚠️  Spider produced 0 items. Capturing arxiv listing-page snapshot for diagnosis…"
+            for cat in $(echo "$CATEGORIES" | tr ',' ' '); do
+              cat=$(echo "$cat" | tr -d ' ')
+              echo "--- /list/${cat}/new ---"
+              curl -sSL -A "$(grep USER_AGENT daily_arxiv/settings.py | head -1)" \
+                "https://arxiv.org/list/${cat}/new" \
+                | grep -oE '<title>[^<]*</title>|/abs/[0-9]+\.[0-9]+|No new submissions' \
+                | head -8 || true
+            done
+            echo "❌ Failing the workflow so this is visible in the UI."
+            exit 1
+        fi
+
         echo "crawl_date=$today" >> $GITHUB_OUTPUT
-        echo "爬取完成 / Crawling completed"
+        echo "✅ Crawl completed: $crawl_count items"
         
     - name: Check for duplicates
       id: dedup_check
