@@ -1,0 +1,221 @@
+/**
+ * Personalization layer for Jade (zefengc@andrew.cmu.edu)
+ * Research focus: Molecular Crystal Structure Prediction (MCSP) & AI4Science
+ *
+ * Non-invasive: runs alongside the upstream scripts. Seeds default
+ * keyword preferences on first visit, injects a hero banner, and adds
+ * small quality-of-life UI tweaks. Safe to delete this file plus the
+ * <script>/<link> tags in the HTML files to revert.
+ */
+(function () {
+  'use strict';
+
+  const PROFILE = {
+    displayName: 'Jade',
+    affiliation: 'Carnegie Mellon University',
+    fields: ['Molecular Crystal Structure Prediction', 'AI for Science'],
+    // Curated seed list. Users can edit/remove these freely in Settings.
+    defaultKeywords: [
+      'crystal structure prediction',
+      'molecular crystal',
+      'polymorph',
+      'lattice energy',
+      'AI4Science',
+      'machine learning potential',
+      'graph neural network',
+      'equivariant',
+      'diffusion model',
+      'generative model',
+      'materials discovery',
+      'DFT'
+    ],
+    seedFlag: 'mcsp_defaults_seeded_v1'
+  };
+
+  // ---- Seed default keywords on first visit ---------------------------------
+  function seedDefaultKeywords() {
+    try {
+      const alreadySeeded = localStorage.getItem(PROFILE.seedFlag);
+      const existing = localStorage.getItem('preferredKeywords');
+      if (!alreadySeeded && (!existing || existing === '[]')) {
+        localStorage.setItem(
+          'preferredKeywords',
+          JSON.stringify(PROFILE.defaultKeywords)
+        );
+        localStorage.setItem(PROFILE.seedFlag, '1');
+      }
+    } catch (e) {
+      console.warn('[personalization] could not seed defaults:', e);
+    }
+  }
+  seedDefaultKeywords();
+
+  // ---- Time-aware greeting --------------------------------------------------
+  function greeting() {
+    const h = new Date().getHours();
+    if (h < 5)  return 'Burning the midnight oil';
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  // ---- Hero banner ----------------------------------------------------------
+  function buildHero() {
+    const main = document.querySelector('main');
+    if (!main || document.getElementById('personalHero')) return;
+
+    const hero = document.createElement('section');
+    hero.id = 'personalHero';
+    hero.className = 'personal-hero';
+    hero.innerHTML = `
+      <div class="personal-hero-inner">
+        <div class="personal-hero-text">
+          <div class="personal-hero-eyebrow">
+            <span class="hero-dot"></span>
+            <span>${greeting()}, ${PROFILE.displayName}</span>
+          </div>
+          <h1 class="personal-hero-title">
+            Your daily feed for
+            <span class="hero-grad">Molecular Crystal Structure Prediction</span>
+            &amp;
+            <span class="hero-grad-alt">AI4Science</span>
+          </h1>
+          <p class="personal-hero-sub">
+            Curated arXiv papers, AI-summarized — filtered by the keywords you care about.
+            Tap a chip below to focus the feed; manage your list in
+            <a href="settings.html" class="hero-link">Settings</a>.
+          </p>
+          <div class="personal-hero-chips" id="personalHeroChips"></div>
+        </div>
+        <div class="personal-hero-side">
+          <div class="hero-stat">
+            <div class="hero-stat-num" id="heroPaperCount">—</div>
+            <div class="hero-stat-label">papers today</div>
+          </div>
+          <div class="hero-stat">
+            <div class="hero-stat-num" id="heroKeywordCount">—</div>
+            <div class="hero-stat-label">tracked keywords</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Insert before the paper container.
+    const paperContainer = document.getElementById('paperContainer');
+    if (paperContainer) {
+      main.insertBefore(hero, paperContainer);
+    } else {
+      main.prepend(hero);
+    }
+
+    renderHeroChips();
+    updateHeroStats();
+  }
+
+  function renderHeroChips() {
+    const wrap = document.getElementById('personalHeroChips');
+    if (!wrap) return;
+    let kws = [];
+    try {
+      kws = JSON.parse(localStorage.getItem('preferredKeywords') || '[]');
+    } catch (e) {}
+    if (!kws.length) {
+      wrap.innerHTML = `<span class="hero-chip hero-chip-empty">
+        No keywords yet — add some in Settings to personalize the feed.
+      </span>`;
+      return;
+    }
+    // Show first 6, then "+N more"
+    const shown = kws.slice(0, 6);
+    const extra = kws.length - shown.length;
+    wrap.innerHTML = shown
+      .map(k => `<span class="hero-chip" data-kw="${escapeHtml(k)}">${escapeHtml(k)}</span>`)
+      .join('') + (extra > 0
+        ? `<span class="hero-chip hero-chip-more" title="${escapeHtml(kws.slice(6).join(', '))}">+${extra} more</span>`
+        : '');
+
+    // Clicking a hero chip activates the matching filter tag in the navbar.
+    wrap.querySelectorAll('.hero-chip[data-kw]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const kw = chip.dataset.kw;
+        const target = document.querySelector(`[data-keyword="${cssEscape(kw)}"]`);
+        if (target) target.click();
+        chip.classList.add('hero-chip-pulse');
+        setTimeout(() => chip.classList.remove('hero-chip-pulse'), 600);
+      });
+    });
+  }
+
+  function updateHeroStats() {
+    let kws = [];
+    try {
+      kws = JSON.parse(localStorage.getItem('preferredKeywords') || '[]');
+    } catch (e) {}
+    const kEl = document.getElementById('heroKeywordCount');
+    if (kEl) kEl.textContent = String(kws.length);
+
+    // Count papers when they finish rendering.
+    const pEl = document.getElementById('heroPaperCount');
+    if (!pEl) return;
+    const tryCount = () => {
+      const cards = document.querySelectorAll('#paperContainer .paper-card');
+      if (cards.length) pEl.textContent = String(cards.length);
+    };
+    tryCount();
+    // Observe paper container for late renders.
+    const container = document.getElementById('paperContainer');
+    if (container) {
+      const mo = new MutationObserver(tryCount);
+      mo.observe(container, { childList: true, subtree: true });
+    }
+  }
+
+  // ---- Helpers --------------------------------------------------------------
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+  function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/["\\]/g, '\\$&');
+  }
+
+  // ---- Personalize page chrome ---------------------------------------------
+  function personalizeChrome() {
+    // Title — only on the index page.
+    const isIndex = /(?:^|\/)(index\.html)?$/.test(location.pathname);
+    if (isIndex) {
+      document.title = `Jade · MCSP × AI4Sci · Daily arXiv`;
+    }
+
+    // Tweak the site title to subtly show personalization.
+    const siteTitle = document.querySelector('.site-title');
+    if (siteTitle && !siteTitle.dataset.personalized) {
+      siteTitle.dataset.personalized = '1';
+      siteTitle.innerHTML = `Daily arXiv <span class="site-title-suffix">· MCSP × AI4Sci</span>`;
+    }
+  }
+
+  // ---- Init -----------------------------------------------------------------
+  function init() {
+    personalizeChrome();
+    // Hero only on the index page (where #paperContainer exists).
+    if (document.getElementById('paperContainer')) {
+      buildHero();
+    }
+    // Refresh chips when user returns from Settings.
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'preferredKeywords') {
+        renderHeroChips();
+        updateHeroStats();
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
