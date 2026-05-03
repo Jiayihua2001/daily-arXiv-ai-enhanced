@@ -307,6 +307,176 @@ header {
   background: linear-gradient(135deg, var(--p-indigo), var(--p-violet)) !important;
 }
 
+/* ---------- arXiv URL row on each card ---------- */
+.paper-arxiv-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+.paper-arxiv-link a {
+  color: var(--p-indigo);
+  text-decoration: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(79,70,229,0.08);
+  border: 1px solid rgba(79,70,229,0.18);
+  transition: background .15s ease, color .15s ease;
+}
+.paper-arxiv-link a:hover {
+  background: rgba(79,70,229,0.15);
+  color: var(--p-violet);
+  text-decoration: none;
+}
+.paper-arxiv-link .arxiv-id-prefix {
+  color: #94a3b8;
+  margin-right: 2px;
+}
+.paper-arxiv-link .paper-arxiv-pdf {
+  background: rgba(225,29,72,0.08);
+  border-color: rgba(225,29,72,0.22);
+  color: var(--p-rose);
+  font-weight: 600;
+}
+.paper-arxiv-link .paper-arxiv-pdf:hover {
+  background: rgba(225,29,72,0.16);
+  color: var(--p-rose);
+}
+.paper-arxiv-link .paper-arxiv-copy {
+  background: transparent;
+  border: 1px solid rgba(15,23,42,0.12);
+  color: #64748b;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.paper-arxiv-link .paper-arxiv-copy:hover {
+  background: rgba(15,23,42,0.05);
+  color: var(--p-indigo);
+  border-color: rgba(79,70,229,0.3);
+}
+
+/* ---------- Per-card status controls (★ + Reading/Finished cycle) ---------- */
+.paper-status-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+}
+.status-pip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(15,23,42,0.10);
+  background: white;
+  color: #64748b;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: all .15s ease;
+}
+.status-pip:hover { transform: translateY(-1px); }
+.status-pip.status-star {
+  font-size: 14px;
+  padding: 3px 8px;
+}
+.status-pip.status-star.on {
+  background: linear-gradient(135deg, #ffd166, #f59e0b);
+  color: #fff;
+  border-color: rgba(245,158,11,0.5);
+  box-shadow: 0 4px 10px -4px rgba(245,158,11,0.6);
+}
+.status-pip.status-set.on {
+  background: linear-gradient(135deg, var(--p-indigo), var(--p-violet));
+  color: white;
+  border-color: var(--p-indigo);
+  box-shadow: 0 4px 10px -4px rgba(79,70,229,0.5);
+}
+
+/* Card-level status visual cues */
+.paper-card.paper-status-important {
+  border-color: rgba(245,158,11,0.45) !important;
+  box-shadow: 0 8px 22px -10px rgba(245,158,11,0.35),
+              0 4px 10px -4px rgba(15,23,42,0.06) !important;
+}
+.paper-card.paper-status-important::before {
+  content: "★";
+  position: absolute;
+  top: 8px; left: 10px;
+  color: #f59e0b;
+  font-size: 18px;
+  text-shadow: 0 1px 2px rgba(245,158,11,0.4);
+  z-index: 2;
+}
+.paper-card.paper-status-finished {
+  opacity: 0.78;
+}
+.paper-card.paper-status-finished .paper-card-title {
+  text-decoration: line-through;
+  text-decoration-color: rgba(15,23,42,0.25);
+}
+.paper-card.paper-status-reading {
+  border-left: 3px solid var(--p-indigo) !important;
+}
+
+/* ---------- Status filter bar (header) ---------- */
+.personal-status-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 4px 24px 10px;
+}
+.personal-status-filter .filter-nav-label {
+  font-weight: 600;
+  background: var(--p-grad-hero);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-right: 6px;
+  white-space: nowrap;
+  min-width: 90px;
+  letter-spacing: 0.3px;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+.status-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 11px;
+  background: white;
+  border: 1px solid rgba(15,23,42,0.1);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.status-filter-btn:hover {
+  border-color: rgba(79,70,229,0.35);
+  color: var(--p-indigo);
+}
+.status-filter-btn.active {
+  background: var(--p-grad-hero);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 6px 14px -6px rgba(79,70,229,0.5);
+}
+.status-filter-btn .cnt {
+  opacity: 0.65;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
 /* ---------- Empty state when keyword filter yields zero matches ---------- */
 .personal-empty {
   margin: 32px auto;

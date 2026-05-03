@@ -1,10 +1,12 @@
 arxiv:
-  categories:  # MCSP × AI4Sci focus
+  categories:  # MCSP × AI4Sci focus — note: there is NO "cs.CSP" category
     - cond-mat.mtrl-sci   # Materials science
     - physics.chem-ph     # Chemical physics
     - physics.comp-ph     # Computational physics
     - cond-mat.soft       # Soft condensed matter
-    - cs.LG               # Machine learning
+    - cs.LG               # Machine learning (filtered by keywords)
+    - cs.AI               # Artificial intelligence (filtered by keywords)
+    - q-bio.BM            # Biomolecules (protein-crystal work)
 
 llm:
   model_name: 'deepseek-chat'  # Default LLM (DeepSeek; cheap & solid)

@@ -42,7 +42,7 @@ jobs:
         export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}"
         export TOKEN_GITHUB=${{ secrets.TOKEN_GITHUB }}
         export LANGUAGE="${{ vars.LANGUAGE || 'English' }}"
-        export CATEGORIES="${{ vars.CATEGORIES || 'cond-mat.mtrl-sci, physics.chem-ph, physics.comp-ph, cond-mat.soft, cs.LG' }}"
+        export CATEGORIES="${{ vars.CATEGORIES || 'cond-mat.mtrl-sci, physics.chem-ph, physics.comp-ph, cond-mat.soft, cs.LG, cs.AI, q-bio.BM' }}"
         export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
 
         # 使用Scrapy爬取

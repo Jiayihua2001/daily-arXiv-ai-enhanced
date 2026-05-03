@@ -19,7 +19,8 @@ class ArxivSpider(scrapy.Spider):
         super().__init__(*args, **kwargs)
         categories = os.environ.get(
             "CATEGORIES",
-            "cond-mat.mtrl-sci,physics.chem-ph,physics.comp-ph,cond-mat.soft,cs.LG",
+            "cond-mat.mtrl-sci,physics.chem-ph,physics.comp-ph,cond-mat.soft,"
+            "cs.LG,cs.AI,q-bio.BM",
         )
         self.target_categories = {c.strip() for c in categories.split(",") if c.strip()}
         self.start_urls = [

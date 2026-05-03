@@ -420,18 +420,214 @@
     }
   }
 
+  // ===========================================================================
+  // Per-paper enhancements: arXiv URL on each card + personal status tags
+  // ===========================================================================
+
+  const STATUS_KEY = 'paperStatuses_v1';
+  // statuses: { [arxivId]: { important: bool, status: 'unread'|'reading'|'finished' } }
+
+  function loadStatuses() {
+    try { return JSON.parse(localStorage.getItem(STATUS_KEY) || '{}'); }
+    catch (e) { return {}; }
+  }
+  function saveStatuses(s) {
+    try { localStorage.setItem(STATUS_KEY, JSON.stringify(s)); } catch (e) {}
+  }
+  function getStatus(id) {
+    const s = loadStatuses();
+    return s[id] || { important: false, status: 'unread' };
+  }
+  function setStatus(id, patch) {
+    const s = loadStatuses();
+    s[id] = Object.assign({ important: false, status: 'unread' }, s[id] || {}, patch);
+    saveStatuses(s);
+    updateStatusFilterCounts();
+  }
+
+  // Inject arxiv URL row + status controls into a single .paper-card.
+  function enhanceCard(card) {
+    if (!card || card.dataset.personalEnhanced) return;
+    const id = card.dataset.id;
+    if (!id) return;
+    card.dataset.personalEnhanced = '1';
+
+    const status = getStatus(id);
+    if (status.important) card.classList.add('paper-status-important');
+    card.classList.add(`paper-status-${status.status}`);
+
+    const arxivUrl = `https://arxiv.org/abs/${id}`;
+    const pdfUrl   = `https://arxiv.org/pdf/${id}`;
+
+    // ---- URL row (under header) ----
+    const header = card.querySelector('.paper-card-header');
+    if (header && !header.querySelector('.paper-arxiv-link')) {
+      const urlRow = document.createElement('div');
+      urlRow.className = 'paper-arxiv-link';
+      urlRow.innerHTML = `
+        <a href="${arxivUrl}" target="_blank" rel="noopener"
+           onclick="event.stopPropagation()" title="Open on arXiv">
+          <span class="arxiv-id-prefix">arXiv:</span>${escapeHtml(id)}
+        </a>
+        <a href="${pdfUrl}" target="_blank" rel="noopener"
+           onclick="event.stopPropagation()" class="paper-arxiv-pdf"
+           title="Open PDF">PDF</a>
+        <button class="paper-arxiv-copy" type="button"
+           onclick="event.stopPropagation()" title="Copy URL">⧉</button>
+      `;
+      header.appendChild(urlRow);
+      urlRow.querySelector('.paper-arxiv-copy').addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        try {
+          await navigator.clipboard.writeText(arxivUrl);
+          ev.currentTarget.textContent = '✓';
+          setTimeout(() => { ev.currentTarget.textContent = '⧉'; }, 1200);
+        } catch (e) { /* ignore */ }
+      });
+    }
+
+    // ---- Status control row (in body footer) ----
+    const footer = card.querySelector('.paper-card-footer .footer-left') ||
+                   card.querySelector('.paper-card-footer');
+    if (footer && !card.querySelector('.paper-status-controls')) {
+      const ctrl = document.createElement('div');
+      ctrl.className = 'paper-status-controls';
+      ctrl.innerHTML = `
+        <button class="status-pip status-star ${status.important ? 'on' : ''}"
+                data-act="star" title="Mark important"
+                onclick="event.stopPropagation()">★</button>
+        <button class="status-pip status-set ${status.status !== 'unread' ? 'on' : ''}"
+                data-act="cycle" title="Cycle: unread → reading → finished"
+                onclick="event.stopPropagation()">${statusLabel(status.status)}</button>
+      `;
+      footer.appendChild(ctrl);
+
+      ctrl.querySelector('[data-act=star]').addEventListener('click', (ev) => {
+        const next = !getStatus(id).important;
+        setStatus(id, { important: next });
+        ev.currentTarget.classList.toggle('on', next);
+        card.classList.toggle('paper-status-important', next);
+      });
+      ctrl.querySelector('[data-act=cycle]').addEventListener('click', (ev) => {
+        const cur = getStatus(id).status;
+        const next = cur === 'unread' ? 'reading'
+                   : cur === 'reading' ? 'finished'
+                   : 'unread';
+        setStatus(id, { status: next });
+        ev.currentTarget.textContent = statusLabel(next);
+        ev.currentTarget.classList.toggle('on', next !== 'unread');
+        card.classList.remove('paper-status-unread', 'paper-status-reading', 'paper-status-finished');
+        card.classList.add(`paper-status-${next}`);
+      });
+    }
+  }
+
+  function statusLabel(s) {
+    return s === 'reading'  ? '📖 Reading'
+         : s === 'finished' ? '✅ Finished'
+                            : '📥 Unread';
+  }
+
+  // Run enhanceCard on every existing card + observe for new ones.
+  function watchPaperCards() {
+    const container = document.getElementById('paperContainer');
+    if (!container) return;
+    container.querySelectorAll('.paper-card').forEach(enhanceCard);
+    const mo = new MutationObserver(muts => {
+      muts.forEach(m => {
+        m.addedNodes.forEach(n => {
+          if (n.nodeType !== 1) return;
+          if (n.classList && n.classList.contains('paper-card')) enhanceCard(n);
+          if (n.querySelectorAll) n.querySelectorAll('.paper-card').forEach(enhanceCard);
+        });
+      });
+    });
+    mo.observe(container, { childList: true, subtree: true });
+  }
+
+  // ---- Status filter row (in header) ---------------------------------------
+  let activeStatusFilter = 'all'; // all|important|unread|reading|finished
+
+  function buildStatusFilter() {
+    const filterContainer = document.querySelector('.filter-label-container');
+    if (!filterContainer || document.getElementById('personalStatusFilter')) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'personalStatusFilter';
+    bar.className = 'personal-status-filter';
+    bar.innerHTML = `
+      <span class="filter-nav-label">Status</span>
+      <button class="status-filter-btn active" data-f="all">All <span class="cnt"></span></button>
+      <button class="status-filter-btn" data-f="important">⭐ Important <span class="cnt"></span></button>
+      <button class="status-filter-btn" data-f="reading">📖 Reading <span class="cnt"></span></button>
+      <button class="status-filter-btn" data-f="finished">✅ Finished <span class="cnt"></span></button>
+      <button class="status-filter-btn" data-f="unread">📥 Unread <span class="cnt"></span></button>
+    `;
+    // Insert as a new row below the existing filter container.
+    filterContainer.parentNode.insertBefore(bar, filterContainer.nextSibling);
+
+    bar.querySelectorAll('.status-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        bar.querySelectorAll('.status-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeStatusFilter = btn.dataset.f;
+        applyStatusFilter();
+      });
+    });
+    updateStatusFilterCounts();
+  }
+
+  function applyStatusFilter() {
+    const cards = document.querySelectorAll('#paperContainer .paper-card');
+    cards.forEach(card => {
+      const id = card.dataset.id;
+      const st = id ? getStatus(id) : { important: false, status: 'unread' };
+      let show = true;
+      switch (activeStatusFilter) {
+        case 'important': show = !!st.important; break;
+        case 'reading':   show = st.status === 'reading';  break;
+        case 'finished':  show = st.status === 'finished'; break;
+        case 'unread':    show = st.status === 'unread' && !st.important; break;
+        case 'all':       show = true;
+      }
+      card.style.display = show ? '' : 'none';
+    });
+  }
+
+  function updateStatusFilterCounts() {
+    const all = loadStatuses();
+    const cards = document.querySelectorAll('#paperContainer .paper-card');
+    const counts = { all: cards.length, important: 0, reading: 0, finished: 0, unread: 0 };
+    cards.forEach(c => {
+      const st = c.dataset.id ? all[c.dataset.id] : null;
+      if (st && st.important) counts.important++;
+      const status = (st && st.status) || 'unread';
+      counts[status]++;
+    });
+    const bar = document.getElementById('personalStatusFilter');
+    if (!bar) return;
+    bar.querySelectorAll('.status-filter-btn').forEach(btn => {
+      const c = btn.querySelector('.cnt');
+      if (c) c.textContent = counts[btn.dataset.f] != null ? `(${counts[btn.dataset.f]})` : '';
+    });
+  }
+
   // ---- Init -----------------------------------------------------------------
   function init() {
     personalizeChrome();
-    // Hero only on the index page (where #paperContainer exists).
     if (document.getElementById('paperContainer')) {
       buildHero();
+      buildStatusFilter();
+      watchPaperCards();
     }
-    // Refresh chips when user returns from Settings.
     window.addEventListener('storage', (e) => {
       if (e.key === 'preferredKeywords') {
         renderHeroChips();
         updateHeroStats();
+      }
+      if (e.key === STATUS_KEY) {
+        updateStatusFilterCounts();
+        applyStatusFilter();
       }
     });
   }
