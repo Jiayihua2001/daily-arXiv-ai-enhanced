@@ -4,77 +4,114 @@ import re
 
 
 class ArxivSpider(scrapy.Spider):
+    """
+    Crawl the daily arxiv listing pages and yield one item per paper.
+
+    Extracts every field directly from the listing HTML — no per-paper
+    API call — so the spider works reliably from CI shared IPs that
+    arxiv.org's API would otherwise rate-limit.
+    """
+
+    name = "arxiv"
+    allowed_domains = ["arxiv.org"]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         categories = os.environ.get(
             "CATEGORIES",
             "cond-mat.mtrl-sci,physics.chem-ph,physics.comp-ph,cond-mat.soft,cs.LG",
         )
-        categories = categories.split(",")
-        # 保存目标分类列表，用于后续验证
-        self.target_categories = set(map(str.strip, categories))
+        self.target_categories = {c.strip() for c in categories.split(",") if c.strip()}
         self.start_urls = [
             f"https://arxiv.org/list/{cat}/new" for cat in self.target_categories
-        ]  # 起始URL（计算机科学领域的最新论文）
+        ]
 
-    name = "arxiv"  # 爬虫名称
-    allowed_domains = ["arxiv.org"]  # 允许爬取的域名
+    @staticmethod
+    def _clean(text: str) -> str:
+        return re.sub(r"\s+", " ", text or "").strip()
 
     def parse(self, response):
-        # 提取每篇论文的信息
-        anchors = []
+        # Anchor index of the "Cross-listed" / "Replacements" sections — we
+        # only want fresh "New submissions" entries (id strictly less than
+        # the first non-new boundary).
+        boundary = None
         for li in response.css("div[id=dlpage] ul li"):
-            href = li.css("a::attr(href)").get()
-            if href and "item" in href:
-                anchors.append(int(href.split("item")[-1]))
+            href = li.css("a::attr(href)").get() or ""
+            text = " ".join(li.css("*::text").getall()).lower()
+            if "item" in href and ("cross" in text or "replacement" in text):
+                try:
+                    n = int(href.split("item")[-1])
+                    boundary = n if boundary is None else min(boundary, n)
+                except ValueError:
+                    pass
 
-        # 遍历每篇论文的详细信息
-        for paper in response.css("dl dt"):
-            paper_anchor = paper.css("a[name^='item']::attr(name)").get()
-            if not paper_anchor:
+        for dt in response.css("dl dt"):
+            anchor = dt.css("a[name^='item']::attr(name)").get()
+            if not anchor:
                 continue
-                
-            paper_id = int(paper_anchor.split("item")[-1])
-            if anchors and paper_id >= anchors[-1]:
+            try:
+                paper_idx = int(anchor.split("item")[-1])
+            except ValueError:
+                continue
+            if boundary is not None and paper_idx >= boundary:
                 continue
 
-            # 获取论文ID
-            abstract_link = paper.css("a[title='Abstract']::attr(href)").get()
-            if not abstract_link:
+            abs_link = dt.css("a[title='Abstract']::attr(href)").get()
+            if not abs_link:
                 continue
-                
-            arxiv_id = abstract_link.split("/")[-1]
-            
-            # 获取对应的论文描述部分 (dd元素)
-            paper_dd = paper.xpath("following-sibling::dd[1]")
-            if not paper_dd:
+            arxiv_id = abs_link.split("/")[-1]
+
+            dd = dt.xpath("following-sibling::dd[1]")
+            if not dd:
                 continue
-            
-            # 提取论文分类信息 - 在subjects部分
-            subjects_text = paper_dd.css(".list-subjects .primary-subject::text").get()
-            if not subjects_text:
-                # 如果找不到主分类，尝试其他方式获取分类
-                subjects_text = paper_dd.css(".list-subjects::text").get()
-            
-            if subjects_text:
-                # 解析分类信息，通常格式如 "Computer Vision and Pattern Recognition (cs.CV)"
-                # 提取括号中的分类代码
-                categories_in_paper = re.findall(r'\(([^)]+)\)', subjects_text)
-                
-                # 检查论文分类是否与目标分类有交集
-                paper_categories = set(categories_in_paper)
-                if paper_categories.intersection(self.target_categories):
-                    yield {
-                        "id": arxiv_id,
-                        "categories": list(paper_categories),  # 添加分类信息用于调试
-                    }
-                    self.logger.info(f"Found paper {arxiv_id} with categories {paper_categories}")
-                else:
-                    self.logger.debug(f"Skipped paper {arxiv_id} with categories {paper_categories} (not in target {self.target_categories})")
-            else:
-                # 如果无法获取分类信息，记录警告但仍然返回论文（保持向后兼容）
-                self.logger.warning(f"Could not extract categories for paper {arxiv_id}, including anyway")
-                yield {
-                    "id": arxiv_id,
-                    "categories": [],
-                }
+
+            # Title
+            title_node = dd.css(".list-title")
+            title = self._clean(
+                "".join(
+                    t for t in title_node.css("*::text").getall()
+                    if t.strip() and t.strip().lower() != "title:"
+                )
+            )
+
+            # Authors
+            authors = [
+                self._clean(a)
+                for a in dd.css(".list-authors a::text").getall()
+                if a.strip()
+            ]
+
+            # Subjects → category codes inside parentheses
+            subjects_text = " ".join(dd.css(".list-subjects *::text").getall())
+            paper_categories = re.findall(r"\(([^)]+)\)", subjects_text)
+            paper_categories_set = set(paper_categories)
+
+            # The listing page is already filtered to one of our target
+            # categories, but a paper may also be cross-listed elsewhere;
+            # accept it as long as it overlaps the target set.
+            if self.target_categories and not (
+                paper_categories_set & self.target_categories
+            ):
+                continue
+
+            # Abstract
+            summary = self._clean(
+                " ".join(dd.css("p.mathjax::text").getall())
+            )
+
+            # Optional: comment ("Comments: ...") — present in some listings.
+            comment_text = " ".join(dd.css(".list-comments *::text").getall())
+            comment = self._clean(
+                re.sub(r"^\s*comments?:\s*", "", comment_text, flags=re.I)
+            ) or None
+
+            yield {
+                "id": arxiv_id,
+                "categories": paper_categories or list(self.target_categories),
+                "pdf": f"https://arxiv.org/pdf/{arxiv_id}",
+                "abs": f"https://arxiv.org/abs/{arxiv_id}",
+                "authors": authors,
+                "title": title,
+                "comment": comment,
+                "summary": summary,
+            }
