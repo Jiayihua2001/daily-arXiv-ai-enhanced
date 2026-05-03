@@ -265,11 +265,19 @@
             <a href="settings.html" class="hero-link">Settings</a>.
           </p>
           <div class="personal-hero-chips" id="personalHeroChips"></div>
+          <div class="personal-hero-ranges" id="personalHeroRanges">
+            <span class="hero-range-label">Window</span>
+            <button class="hero-range-btn" data-range="1">Today</button>
+            <button class="hero-range-btn" data-range="7">Last 7d</button>
+            <button class="hero-range-btn active" data-range="30">Last 30d</button>
+            <button class="hero-range-btn" data-range="90">Last 3mo</button>
+            <button class="hero-range-btn" data-range="custom">Custom…</button>
+          </div>
         </div>
         <div class="personal-hero-side">
           <div class="hero-stat">
             <div class="hero-stat-num" id="heroPaperCount">—</div>
-            <div class="hero-stat-label">papers today</div>
+            <div class="hero-stat-label">papers in window</div>
           </div>
           <div class="hero-stat">
             <div class="hero-stat-num" id="heroKeywordCount">—</div>
@@ -289,6 +297,101 @@
 
     renderHeroChips();
     updateHeroStats();
+    wireRangePresets();
+  }
+
+  // ---- Time-range presets --------------------------------------------------
+  // The upstream app already exposes loadPapersByDate / loadPapersByDateRange
+  // and a global `availableDates` array. We just compute start/end dates and
+  // call them. Default = Last 30 days.
+
+  const DEFAULT_RANGE_DAYS = 30;
+
+  function _isoDaysAgo(n) {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);  // YYYY-MM-DD
+  }
+  function _todayIso() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  // app.js declares `let availableDates` at script-top-level (not on window).
+  // Use a guarded eval to read it from the shared script lexical scope.
+  function _readAvailableDates() {
+    try { return availableDates; } catch (_) { return undefined; }  // eslint-disable-line no-undef
+  }
+  function _availableDatesReady() {
+    const v = _readAvailableDates();
+    return Array.isArray(v) && v.length > 0;
+  }
+
+  // Wait until availableDates is populated, then call cb.
+  function _whenDatesReady(cb, attempts = 60) {
+    if (_availableDatesReady()) return cb();
+    if (attempts <= 0) return;
+    setTimeout(() => _whenDatesReady(cb, attempts - 1), 100);
+  }
+
+  function applyRange(rangeDays) {
+    _whenDatesReady(() => {
+      const dates = _readAvailableDates() || [];
+      if (rangeDays === 1) {
+        if (typeof window.loadPapersByDate === 'function' && dates.length) {
+          window.loadPapersByDate(dates[0]);
+        }
+        return;
+      }
+      const today = _todayIso();
+      const start = _isoDaysAgo(rangeDays - 1);
+      const inRange = dates.filter(d => d >= start && d <= today).sort();
+      if (inRange.length === 0) {
+        // Window had no dates with data — fall back to the newest available.
+        if (typeof window.loadPapersByDate === 'function' && dates.length) {
+          window.loadPapersByDate(dates[0]);
+        }
+        return;
+      }
+      const startEffective = inRange[0];
+      const endEffective   = inRange[inRange.length - 1];
+      if (typeof window.loadPapersByDateRange === 'function') {
+        window.loadPapersByDateRange(startEffective, endEffective);
+      }
+    });
+  }
+
+  function wireRangePresets() {
+    const bar = document.getElementById('personalHeroRanges');
+    if (!bar || bar.dataset.wired) return;
+    bar.dataset.wired = '1';
+    bar.querySelectorAll('.hero-range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        bar.querySelectorAll('.hero-range-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const r = btn.dataset.range;
+        if (r === 'custom') {
+          const calBtn = document.getElementById('calendarButton');
+          if (calBtn) calBtn.click();
+          // Make sure range mode is on so the user can pick two dates.
+          const rangeToggle = document.getElementById('dateRangeMode');
+          if (rangeToggle && !rangeToggle.checked) {
+            rangeToggle.checked = true;
+            rangeToggle.dispatchEvent(new Event('change'));
+          }
+          return;
+        }
+        applyRange(parseInt(r, 10));
+      });
+    });
+
+    // First-load override: load the last 30 days instead of just today.
+    _whenDatesReady(() => {
+      // Honor URL params (?date=...) — if the upstream app already chose a
+      // specific date due to a URL param or single-date click, don't override.
+      if (window.location.search.includes('date=')) return;
+      applyRange(DEFAULT_RANGE_DAYS);
+    });
   }
 
   function renderHeroChips() {
