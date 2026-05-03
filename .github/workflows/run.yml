@@ -8,6 +8,11 @@ on:
     - cron: "30 1 * * *"
   workflow_dispatch:
 
+# Allow the GITHUB_TOKEN to push commits/branches back to this repo
+# (needed by the 'Push code changes to main' and 'Push data changes
+# to data branch' steps below).
+permissions:
+  contents: write
 
 jobs:
   build:
