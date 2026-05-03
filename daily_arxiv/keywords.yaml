@@ -1,42 +1,49 @@
 # Topical pre-filter for the daily pipeline (MCSP × AI4Sci).
 #
-# Behavior: a paper is KEPT if its title or abstract contains any of the
-# below substrings (case-insensitive). If the file is empty or missing,
-# no filter is applied.
-#
-# Edit freely — these are read at workflow runtime by
-# `daily_arxiv/filter_relevance.py`.
+# Strategy: a paper is KEPT if its title or abstract contains any of
+# the substrings below (case-insensitive). The list is deliberately
+# narrow — every term should be a strong signal that the paper is
+# about molecular/crystal structures or materials chemistry, not just
+# a generic ML paper that happens to mention "GNN" or "diffusion".
 
 keywords:
-  # --- Molecular Crystal Structure Prediction ---
+  # --- Core MCSP terms ---
   - crystal structure prediction
   - molecular crystal
   - polymorph
-  - lattice energy
-  - cocrystal
   - co-crystal
-  - hydrogen bond
-  - space group
+  - cocrystal
+  - lattice energy
+  - structure search                # catches "Generative structure search ..."
+  - generative structure
+  - molecular packing
+  - crystal packing
   - powder diffraction
+  - space group
   - solid form
+  - solid-state form
+  - amorphous solid
+  - crystal engineering
+  - hydrogen bond network
 
-  # --- AI for Science / methods ---
-  - AI4Science
-  - AI for science
+  # --- Adjacent crystalline-materials topics ---
+  - metal-organic framework
+  - covalent organic framework
+  - inorganic crystal
+  - perovskite structure
+  - protein crystal
+  - zeolite
+
+  # --- ML methods *applied to* chemistry/materials specifically ---
   - machine learning potential
   - neural network potential
-  - graph neural network
-  - GNN
-  - equivariant
-  - SE(3)
-  - diffusion model
-  - generative model
-  - flow matching
-  - active learning
-  - foundation model
-  - DFT
+  - molecular dynamics simulation
   - density functional theory
-  - molecular dynamics
-  - force field
-  - materials discovery
+  - DFT calculation
   - inverse design
+  - materials discovery
+  - molecular generation
+  - molecular discovery
+  - generative chemistry
+  - crystal generation
+  - molecule generation

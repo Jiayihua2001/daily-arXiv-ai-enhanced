@@ -14,22 +14,29 @@
     displayName: 'Jade',
     affiliation: 'Carnegie Mellon University',
     fields: ['Molecular Crystal Structure Prediction', 'AI for Science'],
-    // Curated seed list. Users can edit/remove these freely in Settings.
+    // Curated seed list. Tight on purpose — every term should be a
+    // strong MCSP/materials signal, not a generic ML term that matches
+    // unrelated cs.LG papers. Users can edit/remove freely in Settings.
     defaultKeywords: [
       'crystal structure prediction',
       'molecular crystal',
       'polymorph',
+      'co-crystal',
       'lattice energy',
-      'AI4Science',
+      'structure search',
+      'molecular packing',
+      'crystal packing',
+      'crystal engineering',
       'machine learning potential',
-      'graph neural network',
-      'equivariant',
-      'diffusion model',
-      'generative model',
+      'inverse design',
       'materials discovery',
-      'DFT'
+      'molecular generation',
+      'crystal generation'
     ],
-    seedFlag: 'mcsp_defaults_seeded_v1'
+    // Bump the version when the default list changes — we'll re-seed
+    // local storage one more time so existing visitors pick up the
+    // tighter list rather than living with stale broad defaults.
+    seedFlag: 'mcsp_defaults_seeded_v2'
   };
 
   // ---- Data-source fallback + topical keyword filter shim ------------------
@@ -47,8 +54,46 @@
     } catch (e) { return []; }
   }
 
+  // Detect non-Latin (essentially CJK) text. We only need a coarse signal —
+  // upstream summaries are Chinese; the user's own pipeline produces English.
+  function _isCJK(s) {
+    if (!s) return false;
+    return /[㐀-鿿]/.test(s);  // CJK ideographs
+  }
+
+  // If the AI summary is in Chinese (because we fell back to upstream),
+  // replace it with the original English abstract so the user actually
+  // gets English content. We split a long abstract into pseudo-fields
+  // so the existing UI rendering still works.
+  function _swapChineseAIWithEnglishAbstract(obj) {
+    const abstract = obj.summary || '';
+    if (!abstract) return obj;
+    const ai = obj.AI || {};
+    const looksChinese = _isCJK(ai.tldr) || _isCJK(ai.motivation)
+                      || _isCJK(ai.method) || _isCJK(ai.conclusion);
+    if (!looksChinese) return obj;
+
+    // First sentence of the abstract → tldr; rest goes into motivation.
+    const sentences = abstract.match(/[^.!?]+[.!?]+/g) || [abstract];
+    const tldr = (sentences[0] || abstract).trim();
+    const rest = sentences.slice(1).join(' ').trim();
+    obj.AI = {
+      tldr: tldr,
+      motivation:
+        '⚠️ Upstream-fallback paper — AI summary is in Chinese on the source repo. ' +
+        'Showing the original English abstract instead. Once your own pipeline ' +
+        'finishes a successful run, this paper will be replaced by an English ' +
+        'AI summary tailored to your field.',
+      method:     rest || '',
+      result:     '',
+      conclusion: ''
+    };
+    obj._fallbackEnglishAbstract = true;
+    return obj;
+  }
+
   function _filterJsonlByKeywords(text, keywords) {
-    if (!keywords || !keywords.length || !text) return { text, kept: null, total: null };
+    if (!text) return { text, kept: null, total: null };
     const lines = text.split('\n');
     const kept = [];
     let total = 0;
@@ -57,19 +102,27 @@
       total++;
       let obj;
       try { obj = JSON.parse(line); } catch (e) { continue; }
-      const ai = obj.AI || {};
-      const blob = (
-        (obj.title || '') + ' ' +
-        (obj.summary || '') + ' ' +
-        (ai.tldr || '') + ' ' +
-        (ai.motivation || '') + ' ' +
-        (ai.method || '') + ' ' +
-        (ai.result || '') + ' ' +
-        (ai.conclusion || '')
-      ).toLowerCase();
-      if (keywords.some(k => blob.includes(k))) kept.push(line);
+
+      // Always strip Chinese AI summaries (whether or not we filter).
+      const cleaned = _swapChineseAIWithEnglishAbstract(obj);
+
+      if (keywords && keywords.length) {
+        const ai = cleaned.AI || {};
+        const blob = (
+          (cleaned.title || '') + ' ' +
+          (cleaned.summary || '') + ' ' +
+          (ai.tldr || '') + ' ' +
+          (ai.method || '')
+        ).toLowerCase();
+        if (!keywords.some(k => blob.includes(k))) continue;
+      }
+      kept.push(JSON.stringify(cleaned));
     }
-    return { text: kept.join('\n'), kept: kept.length, total };
+    return {
+      text: kept.join('\n'),
+      kept: kept.length,
+      total: total
+    };
   }
 
   function _looksLikeJsonlData(url) {
@@ -104,42 +157,71 @@
       const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
       const r = await _fetchWithFallback(resource, init);
 
-      // Topical filter: rewrite JSONL bodies in place to drop non-matching papers.
+      // Always rewrite JSONL bodies — both for keyword filtering and to
+      // strip Chinese AI summaries when the upstream fallback fires.
       if (r.ok && _looksLikeJsonlData(url)) {
-        const kws = _userKeywordsLower();
-        if (kws.length) {
-          try {
-            const text = await r.clone().text();
-            const { text: filtered, kept, total } = _filterJsonlByKeywords(text, kws);
-            if (kept !== null) {
-              console.info(`[personalization] keyword filter: ${kept}/${total} papers match`);
-              window.__personalizationLastFilter = { kept, total, date: new Date().toISOString() };
-              return new Response(filtered, {
-                status: r.status,
-                statusText: r.statusText,
-                headers: r.headers
-              });
-            }
-          } catch (e) {
-            console.warn('[personalization] filter error, returning raw response', e);
+        try {
+          const kws  = _userKeywordsLower();
+          const text = await r.clone().text();
+          const { text: filtered, kept, total } = _filterJsonlByKeywords(text, kws);
+          if (kept !== null) {
+            console.info(
+              `[personalization] keyword filter: ${kept}/${total} papers match` +
+              (kws.length ? '' : ' (no keywords set — pass-through)')
+            );
+            window.__personalizationLastFilter = {
+              kept, total, date: new Date().toISOString()
+            };
+            return new Response(filtered, {
+              status: r.status,
+              statusText: r.statusText,
+              headers: r.headers
+            });
           }
+        } catch (e) {
+          console.warn('[personalization] filter error, returning raw response', e);
         }
       }
       return r;
     };
   }
 
-  // ---- Seed default keywords on first visit ---------------------------------
+  // ---- Seed default keywords (or migrate them) on first visit --------------
+  // The v1 list was too broad and matched unrelated cs.LG papers. v2 is
+  // strict MCSP × materials. Migration policy:
+  //   - first visit: seed v2
+  //   - returning visit with the literal v1 list still in storage: replace
+  //     with v2 (the user never customized — they were just stuck with
+  //     defaults that produced noisy results)
+  //   - returning visit with a customized list: leave it alone
+  const V1_DEFAULTS = [
+    'crystal structure prediction','molecular crystal','polymorph',
+    'lattice energy','AI4Science','machine learning potential',
+    'graph neural network','equivariant','diffusion model',
+    'generative model','materials discovery','DFT'
+  ];
+  function arraysEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => v === b[i]);
+  }
   function seedDefaultKeywords() {
     try {
-      const alreadySeeded = localStorage.getItem(PROFILE.seedFlag);
-      const existing = localStorage.getItem('preferredKeywords');
-      if (!alreadySeeded && (!existing || existing === '[]')) {
-        localStorage.setItem(
-          'preferredKeywords',
-          JSON.stringify(PROFILE.defaultKeywords)
-        );
+      const seedDoneAt = localStorage.getItem(PROFILE.seedFlag);
+      let saved = [];
+      try { saved = JSON.parse(localStorage.getItem('preferredKeywords') || '[]'); }
+      catch (_) { saved = []; }
+
+      const isFresh        = !saved.length;
+      const isStockV1      = arraysEqual(saved, V1_DEFAULTS);
+      const needsMigration = !seedDoneAt && (isFresh || isStockV1);
+
+      if (needsMigration) {
+        localStorage.setItem('preferredKeywords',
+          JSON.stringify(PROFILE.defaultKeywords));
         localStorage.setItem(PROFILE.seedFlag, '1');
+        if (isStockV1) {
+          console.info('[personalization] migrated v1 defaults → v2 (tighter MCSP list)');
+        }
       }
     } catch (e) {
       console.warn('[personalization] could not seed defaults:', e);
