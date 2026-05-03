@@ -27,20 +27,37 @@ const DATA_CONFIG = {
     dataBranch: 'data',
 
     /**
+     * Fallback (upstream) used when the user's own data branch 404s —
+     * keeps the site usable while their daily pipeline is being set up.
+     */
+    fallbackOwner: 'dw-dengwei',
+    fallbackRepo:  'daily-arXiv-ai-enhanced',
+
+    /**
      * Get the base URL for raw GitHub content from data branch
-     * @returns {string} Base URL for raw GitHub content
      */
     getDataBaseUrl: function() {
         return `https://raw.githubusercontent.com/${this.repoOwner}/${this.repoName}/${this.dataBranch}`;
     },
 
+    getFallbackBaseUrl: function() {
+        return `https://raw.githubusercontent.com/${this.fallbackOwner}/${this.fallbackRepo}/${this.dataBranch}`;
+    },
+
     /**
-     * Get the full URL for a data file
-     * @param {string} filePath - Relative path to the data file (e.g., 'data/2025-01-01.jsonl')
-     * @returns {string} Full URL to the data file
+     * Full URL for a data file on the user's own data branch.
      */
     getDataUrl: function(filePath) {
         return `${this.getDataBaseUrl()}/${filePath}`;
+    },
+
+    /**
+     * Same path on the upstream fallback (returns null if fallback === primary).
+     */
+    getFallbackUrl: function(filePath) {
+        if (this.fallbackOwner === this.repoOwner &&
+            this.fallbackRepo  === this.repoName) return null;
+        return `${this.getFallbackBaseUrl()}/${filePath}`;
     }
 };
 

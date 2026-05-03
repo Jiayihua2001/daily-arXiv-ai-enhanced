@@ -32,6 +32,36 @@
     seedFlag: 'mcsp_defaults_seeded_v1'
   };
 
+  // ---- Data-source fallback shim --------------------------------------------
+  // If the user's own fork hasn't published a data branch yet (or for a given
+  // date doesn't have a file), transparently fall back to upstream so the page
+  // never gets stuck on the loading spinner.
+  if (typeof DATA_CONFIG !== 'undefined' && typeof DATA_CONFIG.getFallbackUrl === 'function') {
+    const _origFetch = window.fetch.bind(window);
+    const primaryBase = DATA_CONFIG.getDataBaseUrl();
+    const fallbackBase = DATA_CONFIG.getFallbackBaseUrl();
+    if (primaryBase !== fallbackBase) {
+      window.fetch = async function (resource, init) {
+        const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
+        if (typeof url === 'string' && url.startsWith(primaryBase)) {
+          try {
+            const r = await _origFetch(resource, init);
+            if (r.ok) return r;
+            // 404/etc on primary → try fallback
+            const altUrl = url.replace(primaryBase, fallbackBase);
+            console.info('[personalization] primary data 404; falling back to upstream:', altUrl);
+            return _origFetch(altUrl, init);
+          } catch (e) {
+            const altUrl = url.replace(primaryBase, fallbackBase);
+            console.info('[personalization] primary fetch threw; trying upstream:', altUrl, e);
+            return _origFetch(altUrl, init);
+          }
+        }
+        return _origFetch(resource, init);
+      };
+    }
+  }
+
   // ---- Seed default keywords on first visit ---------------------------------
   function seedDefaultKeywords() {
     try {

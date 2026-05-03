@@ -1,0 +1,42 @@
+# Topical pre-filter for the daily pipeline (MCSP × AI4Sci).
+#
+# Behavior: a paper is KEPT if its title or abstract contains any of the
+# below substrings (case-insensitive). If the file is empty or missing,
+# no filter is applied.
+#
+# Edit freely — these are read at workflow runtime by
+# `daily_arxiv/filter_relevance.py`.
+
+keywords:
+  # --- Molecular Crystal Structure Prediction ---
+  - crystal structure prediction
+  - molecular crystal
+  - polymorph
+  - lattice energy
+  - cocrystal
+  - co-crystal
+  - hydrogen bond
+  - space group
+  - powder diffraction
+  - solid form
+
+  # --- AI for Science / methods ---
+  - AI4Science
+  - AI for science
+  - machine learning potential
+  - neural network potential
+  - graph neural network
+  - GNN
+  - equivariant
+  - SE(3)
+  - diffusion model
+  - generative model
+  - flow matching
+  - active learning
+  - foundation model
+  - DFT
+  - density functional theory
+  - molecular dynamics
+  - force field
+  - materials discovery
+  - inverse design

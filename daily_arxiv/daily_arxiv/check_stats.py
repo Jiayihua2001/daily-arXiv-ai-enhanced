@@ -78,14 +78,20 @@ def perform_deduplication():
     history_days = 7  # 向前追溯几天的数据进行对比
 
     if not os.path.exists(today_file):
-        print("今日数据文件不存在 / Today's data file does not exist", file=sys.stderr)
+        print(f"❌ Today's data file missing at {today_file}", file=sys.stderr)
         return "no_data"
+
+    file_size = os.path.getsize(today_file)
+    print(f"📁 today_file={today_file}  size={file_size}B", file=sys.stderr)
 
     try:
         today_papers, today_ids = load_papers_data(today_file)
         print(f"今日论文总数: {len(today_papers)} / Today's total papers: {len(today_papers)}", file=sys.stderr)
 
         if not today_papers:
+            print("⚠️  Crawler produced 0 items — likely the arxiv API "
+                  "throttled the pipeline. Check pipeline logs above for "
+                  "'giving up on ... after 3 attempts'.", file=sys.stderr)
             return "no_data"
 
         # 收集历史多日 ID 集合

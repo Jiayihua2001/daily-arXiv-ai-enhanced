@@ -97,8 +97,30 @@ jobs:
                 ;;
         esac
         
-    - name: AI Enhancement Processing
+    - name: Topical pre-filter (MCSP x AI4Sci keywords)
+      id: keyword_filter
       if: steps.dedup_check.outputs.has_new_content == 'true'
+      run: |
+        source .venv/bin/activate
+        echo "Applying keyword pre-filter to drop irrelevant papers before LLM..."
+        cd daily_arxiv
+        set +e
+        python filter_relevance.py
+        filter_exit=$?
+        set -e
+        echo "filter_exit=$filter_exit"
+        if [ "$filter_exit" -eq 1 ]; then
+          echo "has_relevant=false" >> $GITHUB_OUTPUT
+          echo "ℹ️  No papers matched keywords today; skipping LLM/MD/publish steps."
+        elif [ "$filter_exit" -eq 0 ]; then
+          echo "has_relevant=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_relevant=false" >> $GITHUB_OUTPUT
+          exit $filter_exit
+        fi
+
+    - name: AI Enhancement Processing
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -120,7 +142,7 @@ jobs:
         echo "AI增强处理完成 / AI enhancement processing completed"
         
     - name: Convert to Markdown
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -151,14 +173,14 @@ jobs:
         echo "Markdown转换完成 / Markdown conversion completed"
         
     - name: Update file list
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         echo "更新文件列表... / Updating file list..."
         ls data/*.jsonl | sed 's|data/||' > assets/file-list.txt
         echo "文件列表更新完成 / File list updated"
 
     - name: Generate password hash and inject into config
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         echo "🔐 Generating password hash for authentication..."
 
@@ -213,7 +235,7 @@ jobs:
         fi
         
     - name: Inject repository info into data-config.js
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         echo "注入仓库信息到 data-config.js... / Injecting repository info into data-config.js..."
         
@@ -235,7 +257,7 @@ jobs:
         fi
 
     - name: Commit code changes to main branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         git config --global user.email "${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
         git config --global user.name "${{ vars.NAME || 'Jade' }}"
@@ -257,7 +279,7 @@ jobs:
         fi
 
     - name: Push code changes to main branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
@@ -280,7 +302,7 @@ jobs:
         done
 
     - name: Prepare data files for data branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         echo "准备数据文件... / Preparing data files..."
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -296,7 +318,7 @@ jobs:
         echo "数据文件已保存到临时目录 / Data files saved to temporary directory"
 
     - name: Setup and commit to data branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         git config --global user.email "${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
         git config --global user.name "${{ vars.NAME || 'Jade' }}"
@@ -350,7 +372,7 @@ jobs:
         fi
 
     - name: Push data changes to data branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
