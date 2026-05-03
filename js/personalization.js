@@ -25,7 +25,9 @@
       'crystal polymorph',
       'polymorph selection',
       'polymorph stability',
-      'co-crystal',
+      'pharmaceutical co-crystal',
+      'molecular co-crystal',
+      'co-crystal formation',
       'lattice energy',
       'structure search',
       'molecular packing',
@@ -59,7 +61,7 @@
     ],
     // Bump the version when the default list changes — existing visitors
     // who haven't customized get migrated to the new list.
-    seedFlag: 'mcsp_defaults_seeded_v4'
+    seedFlag: 'mcsp_defaults_seeded_v5'
   };
 
   // ---- Data-source fallback + topical keyword filter shim ------------------
@@ -115,6 +117,12 @@
     return obj;
   }
 
+  // Global map of paper id → real URLs from the JSONL, used by the per-card
+  // URL pill so OpenAlex/biorxiv items show their actual landing URL
+  // (a doi.org / pubmed link) instead of a constructed arxiv URL that
+  // would 404.
+  if (!window.__personalizationUrls) window.__personalizationUrls = new Map();
+
   function _filterJsonlByKeywords(text, keywords) {
     if (!text) return { text, kept: null, total: null };
     const lines = text.split('\n');
@@ -128,6 +136,16 @@
 
       // Always strip Chinese AI summaries (whether or not we filter).
       const cleaned = _swapChineseAIWithEnglishAbstract(obj);
+
+      // Capture URLs in the global map keyed by id. The id may be
+      // 'openalex:W...', 'chemrxiv:...', or a bare arxiv id like '2604.X'.
+      if (cleaned.id) {
+        window.__personalizationUrls.set(cleaned.id, {
+          abs: cleaned.abs || null,
+          pdf: cleaned.pdf || null,
+          source: cleaned.source || (cleaned.id.match(/^[a-z]+:/) ? cleaned.id.split(':')[0] : 'arxiv')
+        });
+      }
 
       if (keywords && keywords.length) {
         const ai = cleaned.AI || {};
@@ -248,7 +266,21 @@
     'crystal generation'
   ];
   // v3 had bare 'polymorph' which caught genetic-polymorphism papers.
-  // v4 uses disambiguated 'crystal polymorph' / 'polymorph selection' / etc.
+  // v4 used 'co-crystal' which sometimes matched protein co-crystals.
+  // v5 disambiguates both.
+  const V4_DEFAULTS = [
+    'crystal structure prediction','molecular crystal','crystal polymorph',
+    'polymorph selection','polymorph stability','co-crystal','lattice energy',
+    'structure search','molecular packing','crystal packing',
+    'crystal engineering','space group','pharmaceutical crystal',
+    'metal-organic framework','covalent organic framework','perovskite',
+    'machine learning potential','neural network potential',
+    'interatomic potential','equivariant neural network','inverse design',
+    'materials discovery','molecular generation','crystal generation',
+    'generative chemistry','MACE','NequIP','M3GNet','CHGNet',
+    'density functional theory','ab initio molecular dynamics',
+    'molecular dynamics simulation'
+  ];
   const V3_DEFAULTS = [
     'crystal structure prediction','molecular crystal','polymorph','co-crystal',
     'lattice energy','structure search','molecular packing','crystal packing',
@@ -276,14 +308,15 @@
       const isStockV1      = arraysEqual(saved, V1_DEFAULTS);
       const isStockV2      = arraysEqual(saved, V2_DEFAULTS);
       const isStockV3      = arraysEqual(saved, V3_DEFAULTS);
-      const needsMigration = !seedDoneAt && (isFresh || isStockV1 || isStockV2 || isStockV3);
+      const isStockV4      = arraysEqual(saved, V4_DEFAULTS);
+      const needsMigration = !seedDoneAt && (isFresh || isStockV1 || isStockV2 || isStockV3 || isStockV4);
 
       if (needsMigration) {
         localStorage.setItem('preferredKeywords',
           JSON.stringify(PROFILE.defaultKeywords));
         localStorage.setItem(PROFILE.seedFlag, '1');
-        if (isStockV1 || isStockV2 || isStockV3) {
-          console.info(`[personalization] migrated stock keyword list → v4 (disambiguated polymorph terms; ${PROFILE.defaultKeywords.length} terms)`);
+        if (isStockV1 || isStockV2 || isStockV3 || isStockV4) {
+          console.info(`[personalization] migrated stock keyword list → v5 (sharper co-crystal/solid-form terms; ${PROFILE.defaultKeywords.length} terms)`);
         }
       }
     } catch (e) {
@@ -611,7 +644,7 @@
     updateStatusFilterCounts();
   }
 
-  // Inject arxiv URL row + status controls into a single .paper-card.
+  // Inject paper URL row + status controls into a single .paper-card.
   function enhanceCard(card) {
     if (!card || card.dataset.personalEnhanced) return;
     const id = card.dataset.id;
@@ -622,22 +655,43 @@
     if (status.important) card.classList.add('paper-status-important');
     card.classList.add(`paper-status-${status.status}`);
 
-    const arxivUrl = `https://arxiv.org/abs/${id}`;
-    const pdfUrl   = `https://arxiv.org/pdf/${id}`;
+    // Pull real URLs from the global map populated by the fetch shim.
+    // Falls back to constructed arxiv URLs only when the id LOOKS like
+    // a bare arxiv id (no source-prefix colon).
+    const meta = window.__personalizationUrls?.get(id);
+    const isArxivLike = !id.includes(':');
+    const absUrl = meta?.abs || (isArxivLike ? `https://arxiv.org/abs/${id}` : null);
+    const pdfUrl = meta?.pdf || (isArxivLike ? `https://arxiv.org/pdf/${id}` : null);
+    const source = meta?.source || (isArxivLike ? 'arxiv' : id.split(':')[0]);
+
+    // Friendly id label: 'arXiv:2604.123' or 'openalex:W7159...' or
+    // 'doi.org/10.123/...' for openalex with a DOI url.
+    let displayId = id;
+    if (source === 'openalex' && absUrl && absUrl.includes('doi.org/')) {
+      displayId = absUrl.split('doi.org/')[1].slice(0, 30);
+    } else if (source === 'arxiv' && !id.includes(':')) {
+      displayId = id;
+    } else if (id.includes(':')) {
+      displayId = id.split(':')[1].slice(0, 16);
+    }
+    const sourceBadge = source.toUpperCase();
 
     // ---- URL row (under header) ----
     const header = card.querySelector('.paper-card-header');
-    if (header && !header.querySelector('.paper-arxiv-link')) {
+    if (header && !header.querySelector('.paper-arxiv-link') && absUrl) {
       const urlRow = document.createElement('div');
       urlRow.className = 'paper-arxiv-link';
+      const pdfChip = pdfUrl
+        ? `<a href="${pdfUrl}" target="_blank" rel="noopener"
+              onclick="event.stopPropagation()" class="paper-arxiv-pdf"
+              title="Open PDF">PDF</a>`
+        : '';
       urlRow.innerHTML = `
-        <a href="${arxivUrl}" target="_blank" rel="noopener"
-           onclick="event.stopPropagation()" title="Open on arXiv">
-          <span class="arxiv-id-prefix">arXiv:</span>${escapeHtml(id)}
+        <a href="${absUrl}" target="_blank" rel="noopener"
+           onclick="event.stopPropagation()" title="Open paper">
+          <span class="arxiv-id-prefix">${escapeHtml(sourceBadge)}:</span>${escapeHtml(displayId)}
         </a>
-        <a href="${pdfUrl}" target="_blank" rel="noopener"
-           onclick="event.stopPropagation()" class="paper-arxiv-pdf"
-           title="Open PDF">PDF</a>
+        ${pdfChip}
         <button class="paper-arxiv-copy" type="button"
            onclick="event.stopPropagation()" title="Copy URL">⧉</button>
       `;
@@ -645,7 +699,7 @@
       urlRow.querySelector('.paper-arxiv-copy').addEventListener('click', async (ev) => {
         ev.preventDefault();
         try {
-          await navigator.clipboard.writeText(arxivUrl);
+          await navigator.clipboard.writeText(absUrl);
           ev.currentTarget.textContent = '✓';
           setTimeout(() => { ev.currentTarget.textContent = '⧉'; }, 1200);
         } catch (e) { /* ignore */ }

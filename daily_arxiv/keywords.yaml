@@ -23,8 +23,16 @@ keywords:
   - polymorphic phase
   - polymorphic crystal
   - conformational polymorph
-  - co-crystal
-  - cocrystal
+  # bare 'co-crystal' has matched protein/peptide co-crystal complexes
+  # that are not MCSP. Prefer disambiguated variants:
+  - molecular co-crystal
+  - molecular cocrystal
+  - pharmaceutical co-crystal
+  - pharmaceutical cocrystal
+  - co-crystal formation
+  - cocrystal formation
+  - co-crystal screening
+  - cocrystal screening
   - lattice energy
   - structure search
   - generative structure
@@ -34,9 +42,15 @@ keywords:
   - crystal growth
   - crystal nucleation
   - molecular solid
-  - solid form
-  - solid-state form
-  - amorphous solid
+  # 'solid form' alone matches 'solid lipid' and similar. Narrow to MCSP
+  # context.
+  - solid form selection
+  - solid form screening
+  - polymorphic solid form
+  - crystalline solid form
+  - solid-state form selection
+  - amorphous solid dispersion
+  - amorphous solid form
   - powder diffraction
   - single crystal
   - single-crystal

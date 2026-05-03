@@ -150,8 +150,16 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         item['AI'] = {**default_ai_fields, **partial_data}
         print(f"Using partial AI data for {item.get('id', 'unknown')}: {list(partial_data.keys())}", file=sys.stderr)
     except Exception as e:
-        # Catch any other exceptions and provide default values
-        print(f"Unexpected error for {item.get('id', 'unknown')}: {e}", file=sys.stderr)
+        # Catch any other exceptions and provide default values.
+        # Print the first failure with a full traceback (these were
+        # disappearing into stderr without enough detail for diagnosis).
+        import traceback
+        if not getattr(process_single_item, "_first_err_logged", False):
+            print(f"\n{'='*60}\n[enhance] FIRST CALL FAILED — full traceback below\n{'='*60}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            print(f"{'='*60}\n[enhance] item id: {item.get('id','?')}\n[enhance] Item title: {item.get('title','?')[:120]}\n[enhance] env OPENAI_BASE_URL = {os.environ.get('OPENAI_BASE_URL','(unset)')}\n[enhance] env MODEL_NAME       = {os.environ.get('MODEL_NAME','(unset)')}\n{'='*60}", file=sys.stderr)
+            process_single_item._first_err_logged = True
+        print(f"Unexpected error for {item.get('id', 'unknown')}: {type(e).__name__}: {e}", file=sys.stderr)
         item['AI'] = default_ai_fields
     
     # Final validation to ensure all required fields exist
@@ -167,9 +175,9 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
 
 def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
     """并行处理所有数据项"""
-    # langchain_openai's ChatOpenAI reads OPENAI_API_BASE (not OPENAI_BASE_URL),
-    # so pass base_url explicitly to support DeepSeek/etc. via the canonical
-    # OPENAI_BASE_URL env var that the rest of the repo uses.
+    # langchain_openai reads OPENAI_API_BASE; the rest of the repo uses
+    # OPENAI_BASE_URL. Map it explicitly so DeepSeek/other compatible
+    # providers actually get hit.
     base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
     api_key  = os.environ.get("OPENAI_API_KEY")
     llm_kwargs = {"model": model_name}
@@ -177,8 +185,22 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
         llm_kwargs["base_url"] = base_url
     if api_key:
         llm_kwargs["api_key"]  = api_key
-    print(f"Connect to: {model_name} via {base_url or '(default openai.com)'}", file=sys.stderr)
-    llm = ChatOpenAI(**llm_kwargs).with_structured_output(Structure, method="function_calling")
+    print(f"Connect to: {model_name} via {base_url or '(default openai.com)'}",
+          file=sys.stderr)
+
+    # DeepSeek's function-calling has had compat issues with langchain in
+    # some versions; json_mode is far more reliable. Try json_mode first
+    # and fall back to function_calling on a per-call basis.
+    base = ChatOpenAI(**llm_kwargs)
+    try:
+        llm = base.with_structured_output(Structure, method="json_mode")
+        method_used = "json_mode"
+    except Exception as e:
+        print(f"[enhance] json_mode setup failed ({e}); falling back to function_calling",
+              file=sys.stderr)
+        llm = base.with_structured_output(Structure, method="function_calling")
+        method_used = "function_calling"
+    print(f"[enhance] structured output method = {method_used}", file=sys.stderr)
     
     prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(system),
