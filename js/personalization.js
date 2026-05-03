@@ -14,10 +14,12 @@
     displayName: 'Jade',
     affiliation: 'Carnegie Mellon University',
     fields: ['Molecular Crystal Structure Prediction', 'AI for Science'],
-    // Curated seed list. Tight on purpose — every term should be a
-    // strong MCSP/materials signal, not a generic ML term that matches
-    // unrelated cs.LG papers. Users can edit/remove freely in Settings.
+    // Broader seed list for v3 — every term should still be a strong
+    // MCSP / materials / ML-for-chemistry signal. Users can edit/remove
+    // freely in Settings. The full filter list is in keywords.yaml on
+    // the pipeline side; this is the subset surfaced as hero chips.
     defaultKeywords: [
+      // core MCSP
       'crystal structure prediction',
       'molecular crystal',
       'polymorph',
@@ -27,16 +29,35 @@
       'molecular packing',
       'crystal packing',
       'crystal engineering',
+      'space group',
+      'pharmaceutical crystal',
+      // adjacent materials
+      'metal-organic framework',
+      'covalent organic framework',
+      'perovskite',
+      // ML for materials
       'machine learning potential',
+      'neural network potential',
+      'interatomic potential',
+      'equivariant neural network',
       'inverse design',
       'materials discovery',
       'molecular generation',
-      'crystal generation'
+      'crystal generation',
+      'generative chemistry',
+      // specific frameworks (high precision signals)
+      'MACE',
+      'NequIP',
+      'M3GNet',
+      'CHGNet',
+      // computational chemistry
+      'density functional theory',
+      'ab initio molecular dynamics',
+      'molecular dynamics simulation'
     ],
-    // Bump the version when the default list changes — we'll re-seed
-    // local storage one more time so existing visitors pick up the
-    // tighter list rather than living with stale broad defaults.
-    seedFlag: 'mcsp_defaults_seeded_v2'
+    // Bump the version when the default list changes — existing visitors
+    // who haven't customized get migrated to the new list.
+    seedFlag: 'mcsp_defaults_seeded_v3'
   };
 
   // ---- Data-source fallback + topical keyword filter shim ------------------
@@ -187,18 +208,20 @@
   }
 
   // ---- Seed default keywords (or migrate them) on first visit --------------
-  // The v1 list was too broad and matched unrelated cs.LG papers. v2 is
-  // strict MCSP × materials. Migration policy:
-  //   - first visit: seed v2
-  //   - returning visit with the literal v1 list still in storage: replace
-  //     with v2 (the user never customized — they were just stuck with
-  //     defaults that produced noisy results)
-  //   - returning visit with a customized list: leave it alone
+  // Migration policy: if the user is still on a known stock list (v1 or v2),
+  // upgrade to the current default. If they've customized the list, leave it.
   const V1_DEFAULTS = [
     'crystal structure prediction','molecular crystal','polymorph',
     'lattice energy','AI4Science','machine learning potential',
     'graph neural network','equivariant','diffusion model',
     'generative model','materials discovery','DFT'
+  ];
+  const V2_DEFAULTS = [
+    'crystal structure prediction','molecular crystal','polymorph',
+    'co-crystal','lattice energy','structure search','molecular packing',
+    'crystal packing','crystal engineering','machine learning potential',
+    'inverse design','materials discovery','molecular generation',
+    'crystal generation'
   ];
   function arraysEqual(a, b) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
@@ -213,14 +236,15 @@
 
       const isFresh        = !saved.length;
       const isStockV1      = arraysEqual(saved, V1_DEFAULTS);
-      const needsMigration = !seedDoneAt && (isFresh || isStockV1);
+      const isStockV2      = arraysEqual(saved, V2_DEFAULTS);
+      const needsMigration = !seedDoneAt && (isFresh || isStockV1 || isStockV2);
 
       if (needsMigration) {
         localStorage.setItem('preferredKeywords',
           JSON.stringify(PROFILE.defaultKeywords));
         localStorage.setItem(PROFILE.seedFlag, '1');
-        if (isStockV1) {
-          console.info('[personalization] migrated v1 defaults → v2 (tighter MCSP list)');
+        if (isStockV1 || isStockV2) {
+          console.info(`[personalization] migrated stock keyword list → v3 (broader, ${PROFILE.defaultKeywords.length} terms)`);
         }
       }
     } catch (e) {

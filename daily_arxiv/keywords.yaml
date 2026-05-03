@@ -1,49 +1,111 @@
 # Topical pre-filter for the daily pipeline (MCSP × AI4Sci).
 #
-# Strategy: a paper is KEPT if its title or abstract contains any of
-# the substrings below (case-insensitive). The list is deliberately
-# narrow — every term should be a strong signal that the paper is
-# about molecular/crystal structures or materials chemistry, not just
-# a generic ML paper that happens to mention "GNN" or "diffusion".
+# A paper is KEPT if its title or abstract contains ANY of the substrings
+# below (case-insensitive). The list aims for breadth without dragging in
+# unrelated cs.LG noise — every term should be a strong signal that the
+# paper is about molecular/crystal structures, materials chemistry, or
+# ML-for-chemistry/materials specifically.
+#
+# Curated in 5 tiers — comments are documentation, not enforced groups.
 
 keywords:
-  # --- Core MCSP terms ---
+  # ============= Tier 1: core MCSP (very high precision) =====================
   - crystal structure prediction
   - molecular crystal
-  - polymorph
+  - molecular crystals
+  - polymorph                  # catches polymorphism, polymorphs, polymorphic
   - co-crystal
   - cocrystal
   - lattice energy
-  - structure search                # catches "Generative structure search ..."
+  - structure search
   - generative structure
   - molecular packing
   - crystal packing
-  - powder diffraction
-  - space group
+  - crystal engineering
+  - crystal growth
+  - crystal nucleation
+  - molecular solid
   - solid form
   - solid-state form
   - amorphous solid
-  - crystal engineering
+  - powder diffraction
+  - single crystal
+  - single-crystal
+  - space group
   - hydrogen bond network
+  - pharmaceutical crystal
+  - drug polymorph
+  - API polymorph
+  - pi-stacking
+  - van der waals crystal
 
-  # --- Adjacent crystalline-materials topics ---
+  # ============= Tier 2: adjacent crystalline / materials topics =============
   - metal-organic framework
+  - metal organic framework
   - covalent organic framework
-  - inorganic crystal
-  - perovskite structure
-  - protein crystal
+  - perovskite
   - zeolite
+  - protein crystal
+  - biomolecular crystal
+  - inorganic crystal
+  - layered material
+  - 2D material
+  - 2D crystal
+  - phase diagram
+  - phase transition
 
-  # --- ML methods *applied to* chemistry/materials specifically ---
+  # ============= Tier 3: ML methods *applied to* materials/chemistry =========
   - machine learning potential
   - neural network potential
-  - molecular dynamics simulation
-  - density functional theory
-  - DFT calculation
+  - interatomic potential
+  - universal force field
+  - universal interatomic potential
+  - equivariant neural network
+  - E(3)-equivariant
+  - SE(3)-equivariant
+  - message passing neural network
+  - crystal graph
+  - graph neural network for materials
+  - graph neural network for molecules
+  - graph neural network for crystal
   - inverse design
   - materials discovery
   - molecular generation
-  - molecular discovery
-  - generative chemistry
-  - crystal generation
   - molecule generation
+  - crystal generation
+  - structure generation
+  - generative chemistry
+  - generative materials
+  - de novo design
+
+  # ============= Tier 4: specific framework / model names ===================
+  # These are unambiguous — if a paper mentions them, it's in our field.
+  - MACE
+  - NequIP
+  - Allegro
+  - M3GNet
+  - CHGNet
+  - MatGL
+  - SchNet
+  - PaiNN
+  - DimeNet
+  - ALIGNN
+  - GNoME
+  - TorchMD
+  - Open Catalyst
+  - alphafold
+
+  # ============= Tier 5: computational chemistry methods ====================
+  - density functional theory
+  - DFT calculation
+  - ab initio
+  - first-principles
+  - molecular dynamics simulation
+  - ab initio molecular dynamics
+  - enhanced sampling
+  - metadynamics
+  - replica exchange
+  - electronic structure calculation
+  - thermodynamic stability
+  - kinetic stability
+  - free energy calculation
