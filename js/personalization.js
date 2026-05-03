@@ -180,27 +180,49 @@
       const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
       const r = await _fetchWithFallback(resource, init);
 
-      // Always rewrite JSONL bodies — both for keyword filtering and to
-      // strip Chinese AI summaries when the upstream fallback fires.
+      // Rewrite JSONL bodies. Two things happen here:
+      //   1. Strip Chinese AI summaries when upstream fallback fires
+      //      (replaces them with the original English abstract).
+      //   2. Apply the user's personal keyword list as a *soft* filter:
+      //      drop unrelated upstream-fallback papers; but if the filter
+      //      would zero-out a feed that the SERVER pipeline already
+      //      filtered (the user's own fork's data branch), don't
+      //      double-filter — pipeline already vetted it.
       if (r.ok && _looksLikeJsonlData(url)) {
         try {
           const kws  = _userKeywordsLower();
           const text = await r.clone().text();
-          const { text: filtered, kept, total } = _filterJsonlByKeywords(text, kws);
-          if (kept !== null) {
-            console.info(
-              `[personalization] keyword filter: ${kept}/${total} papers match` +
-              (kws.length ? '' : ' (no keywords set — pass-through)')
-            );
-            window.__personalizationLastFilter = {
-              kept, total, date: new Date().toISOString()
-            };
-            return new Response(filtered, {
-              status: r.status,
-              statusText: r.statusText,
-              headers: r.headers
-            });
+          const isUserOwnData = url.startsWith(primaryBase);
+          const result = _filterJsonlByKeywords(text, kws);
+
+          // If filtering own-pipeline data would erase everything, fall
+          // back to the rewritten-but-unfiltered text so the user still
+          // sees the papers their own pipeline curated.
+          let outText = result.text;
+          let didClientFilter = true;
+          if (isUserOwnData && result.kept === 0 && result.total > 0) {
+            const passthrough = _filterJsonlByKeywords(text, []);
+            outText = passthrough.text;
+            didClientFilter = false;
           }
+
+          console.info(
+            `[personalization] feed=${isUserOwnData ? 'own' : 'fallback'}` +
+            ` total=${result.total} kept=${didClientFilter ? result.kept : result.total}` +
+            (didClientFilter ? '' : ' (client filter zeroed; showing pipeline-filtered set)')
+          );
+          window.__personalizationLastFilter = {
+            kept: didClientFilter ? result.kept : result.total,
+            total: result.total,
+            clientFilterApplied: didClientFilter,
+            feed: isUserOwnData ? 'own' : 'fallback',
+            date: new Date().toISOString()
+          };
+          return new Response(outText, {
+            status: r.status,
+            statusText: r.statusText,
+            headers: r.headers
+          });
         } catch (e) {
           console.warn('[personalization] filter error, returning raw response', e);
         }
