@@ -1,7 +1,10 @@
 arxiv:
-  categories:  # 文章类型
-    - cs.CV
-    - cs.CL
+  categories:  # MCSP × AI4Sci focus
+    - cond-mat.mtrl-sci   # Materials science
+    - physics.chem-ph     # Chemical physics
+    - physics.comp-ph     # Computational physics
+    - cond-mat.soft       # Soft condensed matter
+    - cs.LG               # Machine learning
 
 llm:
-  model_name: 'deepseek-chat'  # 使用的LLM模型
+  model_name: 'deepseek-chat'  # Default LLM (DeepSeek; cheap & solid)

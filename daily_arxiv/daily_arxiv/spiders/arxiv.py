@@ -6,7 +6,10 @@ import re
 class ArxivSpider(scrapy.Spider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        categories = os.environ.get("CATEGORIES", "cs.CV")
+        categories = os.environ.get(
+            "CATEGORIES",
+            "cond-mat.mtrl-sci,physics.chem-ph,physics.comp-ph,cond-mat.soft,cs.LG",
+        )
         categories = categories.split(",")
         # 保存目标分类列表，用于后续验证
         self.target_categories = set(map(str.strip, categories))
