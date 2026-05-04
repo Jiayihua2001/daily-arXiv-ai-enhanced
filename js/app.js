@@ -934,13 +934,12 @@ function parseJsonlData(jsonlText, date) {
         code_url: paper.code_url || '',
         code_stars: paper.code_stars || 0,
         code_last_update: paper.code_last_update || '',
-        // Pre-screen scores. screen_ok=false means heuristic/default —
-        // the badge is dimmed and we don't sort by these.
+        // Pre-screen scores. screen_ok=false means LLM call failed — paper
+        // is still shown but no badge and sorts to bottom.
         relevance: typeof screen.relevance === 'number' ? screen.relevance : null,
         significance: typeof screen.significance === 'number' ? screen.significance : null,
         screen_tldr: screen.tldr || '',
-        screen_ok: screen.ok !== false,        // true unless explicitly false
-        screen_heuristic: screen.heuristic === true
+        screen_ok: screen.ok !== false
       });
     } catch (error) {
       console.error('解析JSON行失败:', error, line);
@@ -1418,21 +1417,15 @@ function renderPapers() {
     //   `;
     // }
 
-    // Score badge: only show on papers that got a REAL LLM screen score.
-    // When the LLM call failed, screen.py falls back to a heuristic and
-    // marks screen_ok=false — those don't get a badge (would be misleading).
+    // Score badge: only show when there's a REAL LLM score. No fake/heuristic
+    // scores per user direction — papers with failed LLM calls get NO badge
+    // (they're still visible, just unranked, and sort to the bottom).
     let scoreBadge = '';
     if (paper.screen_ok && paper.significance != null && paper.relevance != null) {
       const sig = paper.significance, rel = paper.relevance;
       const tier = sig >= 8 ? 'high' : sig >= 6 ? 'mid' : 'low';
       scoreBadge = `<div class="score-badge score-${tier}" title="LLM relevance ${rel}/10 · significance ${sig}/10">
         <span class="score-num">${sig}</span>
-        <span class="score-suffix">/10</span>
-      </div>`;
-    } else if (paper.screen_heuristic && paper.relevance != null) {
-      // Heuristic-scored papers get a tiny grey hint instead of the real badge.
-      scoreBadge = `<div class="score-badge score-heuristic" title="Heuristic estimate (LLM was unavailable). Relevance ~${paper.relevance}/10.">
-        <span class="score-num">~${paper.relevance}</span>
         <span class="score-suffix">/10</span>
       </div>`;
     }

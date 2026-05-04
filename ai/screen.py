@@ -64,83 +64,6 @@ SCREEN_MAX_WORKERS      = int(os.environ.get("SCREEN_MAX_WORKERS", "12"))
 
 VALID_BUCKETS = {"Materials", "ML methods", "Chemistry", "Bio", "Physics", "Other"}
 
-# ---------- heuristic fallback (used when the LLM call fails) ----------
-# When the LLM is unreachable / misconfigured we still want USEFUL relevance
-# info on the cards rather than a wall of identical "5/10" badges. Score by
-# counting hits against the curated keyword list — cheap, deterministic,
-# no API call needed.
-def _load_keyword_list() -> list[str]:
-    try:
-        import yaml
-        # keywords.yaml lives next to the daily_arxiv module
-        path = os.path.join(os.path.dirname(__file__), "..", "daily_arxiv",
-                            "keywords.yaml")
-        with open(path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        return [str(k).lower() for k in (cfg.get("keywords") or []) if str(k).strip()]
-    except Exception as e:
-        print(f"[screen] could not load keywords.yaml for heuristic fallback: {e}",
-              file=sys.stderr)
-        return []
-
-_HEURISTIC_KEYWORDS = _load_keyword_list()
-
-_BUCKET_HINTS = [
-    ("Materials",  ("crystal", "polymorph", "lattice", "perovskite",
-                    "framework", "metal-organic", "molecular packing",
-                    "mtrl-sci", "cond-mat")),
-    ("ML methods", ("machine learning", "neural network", "graph neural",
-                    "equivariant", "transformer", "diffusion", "generative",
-                    "potential", "force field", "MACE", "NequIP", "CHGNet",
-                    "alphafold", "cs.LG", "cs.AI", "stat.ML", "foundation model")),
-    ("Chemistry",  ("chemistry", "molecul", "supramolec", "co-crystal",
-                    "cocrystal", "drug", "pharma", "synth", "catal",
-                    "reaction", "DFT", "density functional", "ab initio")),
-    ("Bio",        ("protein", "rna", "dna", "cell", "q-bio", "genom",
-                    "drug discovery", "biolog")),
-    ("Physics",    ("physics", "quantum", "phonon", "phase transition")),
-]
-
-def _heuristic_screen(item: dict) -> dict:
-    """Build a screen result from keyword matches in title + abstract.
-    Returns the same shape as a real LLM screen, with ok=False so the
-    frontend can mark these as estimated."""
-    title = (item.get("title") or "")
-    summary = (item.get("summary") or "")
-    blob = (title + " " + summary).lower()
-
-    # Relevance: count distinct keyword hits. The keyword list is already
-    # tuned for MCSP/AI4Sci, so any hit is a meaningful relevance signal.
-    if _HEURISTIC_KEYWORDS:
-        hits = sum(1 for k in _HEURISTIC_KEYWORDS if k in blob)
-        # 0 hits = 2/10, 1 = 4/10, 2 = 6/10, 3 = 7/10, 4 = 8/10, 5+ = 9/10
-        relevance = min(9, max(2, [2, 4, 6, 7, 8, 9, 9, 9, 9][min(hits, 8)]))
-    else:
-        relevance = 5
-
-    # Significance: we genuinely can't estimate this without reading the
-    # paper. Default to 5 ("unknown / average") rather than guessing.
-    significance = 5
-
-    # Bucket: best-effort from keyword/category matching against hints.
-    cats = " ".join(str(c) for c in (item.get("raw_categories")
-                                     or item.get("categories") or [])).lower()
-    bucket_blob = blob + " " + cats
-    bucket = "Other"
-    for name, hints in _BUCKET_HINTS:
-        if any(h.lower() in bucket_blob for h in hints):
-            bucket = name
-            break
-
-    return {
-        "relevance":    relevance,
-        "significance": significance,
-        "bucket":       bucket,
-        "tldr":         title[:300],   # we don't have a real summary; use title
-        "ok":           False,         # mark as estimated for the frontend
-        "heuristic":    True,          # explicit so future code can branch
-    }
-
 SYSTEM_PROMPT = """You evaluate AI-for-science papers for a researcher whose focus is Molecular Crystal Structure Prediction (MCSP) and AI for Science (AI4Sci) — broadly: ML potentials, generative models for molecules/materials, GNNs for chemistry, materials informatics, computational chemistry, foundation models for science.
 
 For each paper, return strict JSON (no prose) with these keys:
@@ -283,18 +206,29 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
             print(f"[screen] {item.get('id','?')} attempt {attempt+1}: "
                   f"{type(e).__name__}: {e}", file=sys.stderr)
 
-    # All LLM attempts failed. Compute a heuristic fallback from the
-    # abstract+title so the user gets *something* useful instead of a
-    # wall of identical 5/10 badges. Mark ok=False so the frontend can
-    # render the badge differently (or hide it).
-    print(f"[screen] {item.get('id','?')}: LLM failed; falling back to heuristic "
+    # All LLM attempts failed. Per user direction: NO heuristic fallback —
+    # only real LLM scores are useful. Return a sentinel so this paper is
+    # tagged as unscored; the workflow's failure-rate guard catches systemic
+    # outages, and per-paper failures keep the paper visible (no badge,
+    # sorts to bottom) but we never fabricate scores.
+    print(f"[screen] {item.get('id','?')}: LLM failed; no score "
           f"(last_text={last_text[:80]!r})", file=sys.stderr)
-    return _heuristic_screen(item)
+    return {
+        "relevance":    None,
+        "significance": None,
+        "bucket":       None,
+        "tldr":         None,
+        "ok":           False,
+    }
 
 
 def should_keep(screen: dict) -> bool:
-    rel = screen.get("relevance", 5)
-    sig = screen.get("significance", 5)
+    # Unscored papers (LLM call failed): keep them visible — we can't judge,
+    # so we don't drop. Frontend won't show a badge and they sort to bottom.
+    rel = screen.get("relevance")
+    sig = screen.get("significance")
+    if rel is None or sig is None:
+        return True
     if rel >= SCREEN_RELEVANCE_AUTOKEEP:
         return True
     return rel >= SCREEN_MIN_RELEVANCE and sig >= SCREEN_MIN_SIGNIFICANCE
@@ -364,8 +298,10 @@ def main() -> int:
                 screen = future.result()
             except Exception as e:
                 print(f"[screen] worker exc on {i}: {e}", file=sys.stderr)
-                screen = {"relevance": 5, "significance": 5, "bucket": "Other",
-                          "tldr": items[i].get("title", "")[:200], "ok": False}
+                # Worker exception: same handling as a per-paper LLM failure.
+                # No fabricated score; let it pass through unscored.
+                screen = {"relevance": None, "significance": None,
+                          "bucket": None, "tldr": None, "ok": False}
             results[i] = (items[i], screen)
 
     # Sanity check: if more than half the LLM calls failed, the screen
@@ -386,16 +322,16 @@ def main() -> int:
     survivors: list[dict] = []
     dropped:  list[dict] = []
     for item, screen in results:
-        # Attach screen to item for downstream use. Keep `ok` + `heuristic`
-        # flags so the frontend can render heuristic scores differently
-        # (or hide the badge) — they're not actual LLM judgments.
+        # Attach screen to item for downstream use. Keep `ok` flag so the
+        # frontend can tell real LLM scores from no-score (failed) ones.
         item = dict(item)
-        item["screen"] = dict(screen)  # includes ok / heuristic when present
-        # Override category bucket with the LLM's read of it
-        item["categories"] = [screen["bucket"]] + [
-            c for c in (item.get("raw_categories") or item.get("categories") or [])
-            if c != screen["bucket"]
-        ]
+        item["screen"] = dict(screen)
+        # Override category bucket with the LLM's read of it (only if we got one)
+        if screen.get("bucket"):
+            item["categories"] = [screen["bucket"]] + [
+                c for c in (item.get("raw_categories") or item.get("categories") or [])
+                if c != screen["bucket"]
+            ]
         if should_keep(screen):
             survivors.append(item)
         else:
@@ -404,10 +340,11 @@ def main() -> int:
     # Safety floor: don't drop more than SCREEN_MAX_DROP_RATIO
     max_drop = int(len(items) * SCREEN_MAX_DROP_RATIO)
     if len(dropped) > max_drop:
-        # Sort dropped by composite score desc, pull back the highest-scoring rejects
         excess = len(dropped) - max_drop
+        # Score-based sort; treat None as 0 so unscored papers don't crash.
         dropped.sort(
-            key=lambda i: (i["screen"]["relevance"] + i["screen"]["significance"]),
+            key=lambda i: ((i["screen"].get("relevance") or 0)
+                           + (i["screen"].get("significance") or 0)),
             reverse=True,
         )
         survivors.extend(dropped[:excess])
@@ -416,12 +353,16 @@ def main() -> int:
               f"(would have dropped {max_drop + excess}/{len(items)} otherwise)",
               file=sys.stderr)
 
-    # Sort survivors by composite (significance first, then relevance) so that
-    # enhance.py processes the most important first — useful if a CI run times out.
-    survivors.sort(
-        key=lambda i: (i["screen"]["significance"], i["screen"]["relevance"]),
-        reverse=True,
-    )
+    # Sort survivors by significance then relevance descending. Unscored
+    # papers (None) sort to the bottom so enhance.py prioritizes the
+    # high-confidence picks if a CI run times out.
+    def _sort_key(i):
+        s = i.get("screen") or {}
+        # Unscored → -1 sort key so they go AFTER any real scores.
+        sig = s.get("significance") if s.get("significance") is not None else -1
+        rel = s.get("relevance")    if s.get("relevance")    is not None else -1
+        return (sig, rel)
+    survivors.sort(key=_sort_key, reverse=True)
 
     # Write outputs
     base = in_path.rsplit(".jsonl", 1)[0]
@@ -441,13 +382,25 @@ def main() -> int:
         for item in dropped:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-    # Summary
-    avg_rel = sum(i["screen"]["relevance"]    for i in survivors) / max(1, len(survivors))
-    avg_sig = sum(i["screen"]["significance"] for i in survivors) / max(1, len(survivors))
+    # Summary — only average over papers that actually got LLM scores
+    scored = [i for i in survivors
+              if (i["screen"].get("relevance") is not None
+                  and i["screen"].get("significance") is not None)]
+    n_scored = len(scored)
+    n_unscored = len(survivors) - n_scored
+    if n_scored:
+        avg_rel = sum(i["screen"]["relevance"]    for i in scored) / n_scored
+        avg_sig = sum(i["screen"]["significance"] for i in scored) / n_scored
+        print(f"[screen] {len(items)} → {len(survivors)} kept "
+              f"({n_scored} LLM-scored, {n_unscored} unscored due to LLM failure, "
+              f"{len(dropped)} dropped). "
+              f"avg relevance={avg_rel:.1f} significance={avg_sig:.1f}", file=sys.stderr)
+    else:
+        print(f"[screen] {len(items)} → {len(survivors)} kept "
+              f"(all unscored due to LLM failure, {len(dropped)} dropped)",
+              file=sys.stderr)
     from collections import Counter
-    bucket_counts = Counter(i["screen"]["bucket"] for i in survivors)
-    print(f"[screen] {len(items)} → {len(survivors)} kept ({len(dropped)} dropped). "
-          f"avg relevance={avg_rel:.1f} significance={avg_sig:.1f}", file=sys.stderr)
+    bucket_counts = Counter(i["screen"].get("bucket") or "(none)" for i in survivors)
     print(f"[screen] survivor buckets: {dict(bucket_counts)}", file=sys.stderr)
     print(f"[screen] wrote {in_path} and {out_path}; rejects → {drop_path}",
           file=sys.stderr)

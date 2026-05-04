@@ -595,14 +595,6 @@ main { padding-bottom: 80px; }
   border-color: var(--coral-line);
 }
 .score-badge.score-mid .score-num { color: var(--coral); }
-/* Heuristic estimate (LLM unavailable) — visually quieter so users know it's not the real LLM judgment */
-.score-badge.score-heuristic {
-  border-color: var(--hairline-2);
-  background: transparent;
-  opacity: 0.7;
-  font-style: italic;
-}
-.score-badge.score-heuristic .score-num { color: var(--ink-3); font-weight: 500; }
 
 /* highlights inside titles + summaries */
 .keyword-highlight,
