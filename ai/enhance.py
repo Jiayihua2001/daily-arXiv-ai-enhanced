@@ -21,6 +21,7 @@ from langchain.prompts import (
     HumanMessagePromptTemplate,
 )
 from structure import Structure
+from openai import OpenAI
 
 if os.path.exists('.env'):
     dotenv.load_dotenv()
@@ -33,6 +34,122 @@ def parse_args():
     parser.add_argument("--data", type=str, required=True, help="jsonline data file")
     parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers")
     return parser.parse_args()
+
+SCHEMA_FIELDS = ["tldr", "motivation", "method", "result", "conclusion"]
+
+
+def _llm_json(client: OpenAI, model_name: str, system_prompt: str, user_prompt: str,
+              language: str, debug_label: str = "") -> Dict:
+    """
+    Call the OpenAI-compatible chat API with response_format=json_object,
+    asking explicitly for a JSON object with the SCHEMA_FIELDS keys. Robust
+    to providers that don't honor json_object and just return text — we
+    extract any JSON object found in the response.
+
+    Raises on hard failures (network, auth, etc.). Returns {} if the model
+    answered but produced un-parseable output.
+    """
+    sys_with_json = (
+        system_prompt.format(language=language).rstrip()
+        + "\n\nRespond with a single valid JSON object containing exactly "
+          f"these keys: {SCHEMA_FIELDS}. "
+          "Do not include any text before or after the JSON object."
+    )
+
+    # Try with response_format first, fall back without it (some
+    # providers reject the param even though OpenAI accepts it).
+    last_text = ""
+    for attempt, kwargs_extra in enumerate([
+        {"response_format": {"type": "json_object"}},
+        {},
+    ]):
+        try:
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system",  "content": sys_with_json},
+                    {"role": "user",    "content": user_prompt},
+                ],
+                temperature=0.3,
+                **kwargs_extra,
+            )
+            text = resp.choices[0].message.content or ""
+            last_text = text
+            data = _extract_json_obj(text)
+            if data:
+                if debug_label and not getattr(_llm_json, "_logged_first_ok", False):
+                    print(f"[enhance] ✓ first OK ({debug_label}): "
+                          f"keys={sorted(data.keys())}",
+                          file=sys.stderr)
+                    _llm_json._logged_first_ok = True
+                return data
+            print(f"[enhance] {debug_label} attempt {attempt+1}: returned non-JSON "
+                  f"text (first 200 chars): {text[:200]!r}", file=sys.stderr)
+        except Exception as e:
+            # Surface the FIRST error verbosely — we've been blind to this.
+            if not getattr(_llm_json, "_logged_first_err", False):
+                import traceback
+                print(f"\n{'='*60}\n[enhance] FIRST CALL FAILED — full traceback:"
+                      f"\n{'='*60}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                print(f"{'='*60}\n[enhance] item: {debug_label}\n"
+                      f"[enhance] OPENAI_BASE_URL = {os.environ.get('OPENAI_BASE_URL','(unset)')}\n"
+                      f"[enhance] MODEL_NAME       = {model_name}\n"
+                      f"{'='*60}", file=sys.stderr)
+                _llm_json._logged_first_err = True
+            # If response_format was the culprit, the next iteration drops it.
+            print(f"[enhance] {debug_label} attempt {attempt+1}: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
+    return {}
+
+
+def _extract_json_obj(text: str) -> Dict:
+    """Find and parse the first {...} JSON object in `text`."""
+    if not text:
+        return {}
+    # Direct parse first.
+    try:
+        v = json.loads(text)
+        if isinstance(v, dict):
+            return v
+    except Exception:
+        pass
+    # Strip markdown code fences (some models wrap JSON in ```json ... ```).
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+    if fenced:
+        try:
+            v = json.loads(fenced.group(1))
+            if isinstance(v, dict):
+                return v
+        except Exception:
+            pass
+    # Find the first balanced {…} object.
+    depth = 0
+    start = -1
+    for i, c in enumerate(text):
+        if c == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0 and start != -1:
+                blob = text[start:i+1]
+                try:
+                    v = json.loads(blob)
+                    if isinstance(v, dict):
+                        return v
+                except Exception:
+                    # Try once more after escaping bare backslashes (LaTeX).
+                    try:
+                        v = json.loads(blob.replace("\\", "\\\\"))
+                        if isinstance(v, dict):
+                            return v
+                    except Exception:
+                        pass
+                start = -1
+    return {}
+
 
 def process_single_item(chain, item: Dict, language: str) -> Dict:
     def is_sensitive(content: str) -> bool:
@@ -124,42 +241,22 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         "conclusion": "Conclusion extraction failed"
     }
     
-    try:
-        response: Structure = chain.invoke({
-            "language": language,
-            "content": item['summary']
-        })
-        item['AI'] = response.model_dump()
-    except langchain_core.exceptions.OutputParserException as e:
-        # 尝试从错误信息中提取 JSON 字符串并修复
-        error_msg = str(e)
-        partial_data = {}
-        
-        if "Function Structure arguments:" in error_msg:
-            try:
-                # 提取 JSON 字符串
-                json_str = error_msg.split("Function Structure arguments:", 1)[1].strip().split('are not valid JSON')[0].strip()
-                # 预处理 LaTeX 数学符号 - 使用四个反斜杠来确保正确转义
-                json_str = json_str.replace('\\', '\\\\')
-                # 尝试解析修复后的 JSON
-                partial_data = json.loads(json_str)
-            except Exception as json_e:
-                print(f"Failed to parse JSON for {item.get('id', 'unknown')}: {json_e}", file=sys.stderr)
-        
-        # Merge partial data with defaults to ensure all fields exist
-        item['AI'] = {**default_ai_fields, **partial_data}
-        print(f"Using partial AI data for {item.get('id', 'unknown')}: {list(partial_data.keys())}", file=sys.stderr)
-    except Exception as e:
-        # Catch any other exceptions and provide default values.
-        # Print the first failure with a full traceback (these were
-        # disappearing into stderr without enough detail for diagnosis).
-        import traceback
-        if not getattr(process_single_item, "_first_err_logged", False):
-            print(f"\n{'='*60}\n[enhance] FIRST CALL FAILED — full traceback below\n{'='*60}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            print(f"{'='*60}\n[enhance] item id: {item.get('id','?')}\n[enhance] Item title: {item.get('title','?')[:120]}\n[enhance] env OPENAI_BASE_URL = {os.environ.get('OPENAI_BASE_URL','(unset)')}\n[enhance] env MODEL_NAME       = {os.environ.get('MODEL_NAME','(unset)')}\n{'='*60}", file=sys.stderr)
-            process_single_item._first_err_logged = True
-        print(f"Unexpected error for {item.get('id', 'unknown')}: {type(e).__name__}: {e}", file=sys.stderr)
+    # Pass-in 'chain' is now (client, model_name, system_prompt, user_template).
+    client, model_name, system_prompt, user_template = chain
+    user_prompt = user_template.format(content=item['summary'])
+    parsed = _llm_json(
+        client, model_name, system_prompt, user_prompt, language,
+        debug_label=item.get("id", "?"),
+    )
+    if parsed:
+        # Coerce all values to strings (LLMs sometimes nest objects).
+        item['AI'] = {
+            k: (parsed[k] if isinstance(parsed.get(k), str)
+                else json.dumps(parsed[k], ensure_ascii=False) if k in parsed
+                else default_ai_fields[k])
+            for k in default_ai_fields.keys()
+        }
+    else:
         item['AI'] = default_ai_fields
     
     # Final validation to ensure all required fields exist
@@ -175,40 +272,24 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
 
 def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
     """并行处理所有数据项"""
-    # langchain_openai reads OPENAI_API_BASE; the rest of the repo uses
-    # OPENAI_BASE_URL. Map it explicitly so DeepSeek/other compatible
-    # providers actually get hit.
+    # Bypass langchain's structured-output entirely — it's been a major
+    # source of opaque failures (DeepSeek's json_mode requires the literal
+    # word 'JSON' in the prompt; function_calling has version drift). We
+    # use the raw openai client which DeepSeek's API is fully compatible
+    # with, and parse JSON ourselves.
     base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
     api_key  = os.environ.get("OPENAI_API_KEY")
-    llm_kwargs = {"model": model_name}
-    if base_url:
-        llm_kwargs["base_url"] = base_url
-    if api_key:
-        llm_kwargs["api_key"]  = api_key
-    print(f"Connect to: {model_name} via {base_url or '(default openai.com)'}",
-          file=sys.stderr)
+    print(f"[enhance] Connect to: {model_name} via "
+          f"{base_url or '(default openai.com)'}", file=sys.stderr)
 
-    # DeepSeek's function-calling has had compat issues with langchain in
-    # some versions; json_mode is far more reliable. Try json_mode first
-    # and fall back to function_calling on a per-call basis.
-    base = ChatOpenAI(**llm_kwargs)
-    try:
-        llm = base.with_structured_output(Structure, method="json_mode")
-        method_used = "json_mode"
-    except Exception as e:
-        print(f"[enhance] json_mode setup failed ({e}); falling back to function_calling",
-              file=sys.stderr)
-        llm = base.with_structured_output(Structure, method="function_calling")
-        method_used = "function_calling"
-    print(f"[enhance] structured output method = {method_used}", file=sys.stderr)
-    
-    prompt_template = ChatPromptTemplate.from_messages([
-        SystemMessagePromptTemplate.from_template(system),
-        HumanMessagePromptTemplate.from_template(template=template)
-    ])
+    client_kwargs = {}
+    if base_url: client_kwargs["base_url"] = base_url
+    if api_key:  client_kwargs["api_key"]  = api_key
+    client = OpenAI(**client_kwargs)
 
-    chain = prompt_template | llm
-    
+    # 'chain' is now a tuple consumed by process_single_item.
+    chain = (client, model_name, system, template)
+
     # 使用线程池并行处理
     processed_data = [None] * len(data)  # 预分配结果列表
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
