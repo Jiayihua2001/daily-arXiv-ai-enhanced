@@ -934,10 +934,13 @@ function parseJsonlData(jsonlText, date) {
         code_url: paper.code_url || '',
         code_stars: paper.code_stars || 0,
         code_last_update: paper.code_last_update || '',
-        // Pre-screen scores (added 2026-05; absent on older days)
+        // Pre-screen scores. screen_ok=false means heuristic/default —
+        // the badge is dimmed and we don't sort by these.
         relevance: typeof screen.relevance === 'number' ? screen.relevance : null,
         significance: typeof screen.significance === 'number' ? screen.significance : null,
-        screen_tldr: screen.tldr || ''
+        screen_tldr: screen.tldr || '',
+        screen_ok: screen.ok !== false,        // true unless explicitly false
+        screen_heuristic: screen.heuristic === true
       });
     } catch (error) {
       console.error('解析JSON行失败:', error, line);
@@ -1119,10 +1122,12 @@ function renderPapers() {
   // 创建匹配论文的集合
   let filteredPapers = [...papers];
 
-  // Default sort: by composite (significance + relevance) descending. Papers
-  // without scores fall to the bottom. Subsequent keyword/text-search sorts
-  // below this then re-order based on match.
+  // Default sort: by composite (significance + relevance) descending.
+  // Papers WITHOUT real LLM scores (screen_ok=false → heuristic or default)
+  // sort BELOW papers with real scores so a bad LLM day doesn't poison
+  // the top-of-feed ordering.
   filteredPapers.sort((a, b) => {
+    if (a.screen_ok !== b.screen_ok) return a.screen_ok ? -1 : 1;
     const scA = (a.significance || 0) + (a.relevance || 0);
     const scB = (b.significance || 0) + (b.relevance || 0);
     return scB - scA;
@@ -1413,13 +1418,21 @@ function renderPapers() {
     //   `;
     // }
 
-    // Score badge: only show if the paper has been pre-screened (newer pipeline).
+    // Score badge: only show on papers that got a REAL LLM screen score.
+    // When the LLM call failed, screen.py falls back to a heuristic and
+    // marks screen_ok=false — those don't get a badge (would be misleading).
     let scoreBadge = '';
-    if (paper.significance != null && paper.relevance != null) {
+    if (paper.screen_ok && paper.significance != null && paper.relevance != null) {
       const sig = paper.significance, rel = paper.relevance;
       const tier = sig >= 8 ? 'high' : sig >= 6 ? 'mid' : 'low';
       scoreBadge = `<div class="score-badge score-${tier}" title="LLM relevance ${rel}/10 · significance ${sig}/10">
         <span class="score-num">${sig}</span>
+        <span class="score-suffix">/10</span>
+      </div>`;
+    } else if (paper.screen_heuristic && paper.relevance != null) {
+      // Heuristic-scored papers get a tiny grey hint instead of the real badge.
+      scoreBadge = `<div class="score-badge score-heuristic" title="Heuristic estimate (LLM was unavailable). Relevance ~${paper.relevance}/10.">
+        <span class="score-num">~${paper.relevance}</span>
         <span class="score-suffix">/10</span>
       </div>`;
     }

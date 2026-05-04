@@ -64,6 +64,83 @@ SCREEN_MAX_WORKERS      = int(os.environ.get("SCREEN_MAX_WORKERS", "12"))
 
 VALID_BUCKETS = {"Materials", "ML methods", "Chemistry", "Bio", "Physics", "Other"}
 
+# ---------- heuristic fallback (used when the LLM call fails) ----------
+# When the LLM is unreachable / misconfigured we still want USEFUL relevance
+# info on the cards rather than a wall of identical "5/10" badges. Score by
+# counting hits against the curated keyword list — cheap, deterministic,
+# no API call needed.
+def _load_keyword_list() -> list[str]:
+    try:
+        import yaml
+        # keywords.yaml lives next to the daily_arxiv module
+        path = os.path.join(os.path.dirname(__file__), "..", "daily_arxiv",
+                            "keywords.yaml")
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return [str(k).lower() for k in (cfg.get("keywords") or []) if str(k).strip()]
+    except Exception as e:
+        print(f"[screen] could not load keywords.yaml for heuristic fallback: {e}",
+              file=sys.stderr)
+        return []
+
+_HEURISTIC_KEYWORDS = _load_keyword_list()
+
+_BUCKET_HINTS = [
+    ("Materials",  ("crystal", "polymorph", "lattice", "perovskite",
+                    "framework", "metal-organic", "molecular packing",
+                    "mtrl-sci", "cond-mat")),
+    ("ML methods", ("machine learning", "neural network", "graph neural",
+                    "equivariant", "transformer", "diffusion", "generative",
+                    "potential", "force field", "MACE", "NequIP", "CHGNet",
+                    "alphafold", "cs.LG", "cs.AI", "stat.ML", "foundation model")),
+    ("Chemistry",  ("chemistry", "molecul", "supramolec", "co-crystal",
+                    "cocrystal", "drug", "pharma", "synth", "catal",
+                    "reaction", "DFT", "density functional", "ab initio")),
+    ("Bio",        ("protein", "rna", "dna", "cell", "q-bio", "genom",
+                    "drug discovery", "biolog")),
+    ("Physics",    ("physics", "quantum", "phonon", "phase transition")),
+]
+
+def _heuristic_screen(item: dict) -> dict:
+    """Build a screen result from keyword matches in title + abstract.
+    Returns the same shape as a real LLM screen, with ok=False so the
+    frontend can mark these as estimated."""
+    title = (item.get("title") or "")
+    summary = (item.get("summary") or "")
+    blob = (title + " " + summary).lower()
+
+    # Relevance: count distinct keyword hits. The keyword list is already
+    # tuned for MCSP/AI4Sci, so any hit is a meaningful relevance signal.
+    if _HEURISTIC_KEYWORDS:
+        hits = sum(1 for k in _HEURISTIC_KEYWORDS if k in blob)
+        # 0 hits = 2/10, 1 = 4/10, 2 = 6/10, 3 = 7/10, 4 = 8/10, 5+ = 9/10
+        relevance = min(9, max(2, [2, 4, 6, 7, 8, 9, 9, 9, 9][min(hits, 8)]))
+    else:
+        relevance = 5
+
+    # Significance: we genuinely can't estimate this without reading the
+    # paper. Default to 5 ("unknown / average") rather than guessing.
+    significance = 5
+
+    # Bucket: best-effort from keyword/category matching against hints.
+    cats = " ".join(str(c) for c in (item.get("raw_categories")
+                                     or item.get("categories") or [])).lower()
+    bucket_blob = blob + " " + cats
+    bucket = "Other"
+    for name, hints in _BUCKET_HINTS:
+        if any(h.lower() in bucket_blob for h in hints):
+            bucket = name
+            break
+
+    return {
+        "relevance":    relevance,
+        "significance": significance,
+        "bucket":       bucket,
+        "tldr":         title[:300],   # we don't have a real summary; use title
+        "ok":           False,         # mark as estimated for the frontend
+        "heuristic":    True,          # explicit so future code can branch
+    }
+
 SYSTEM_PROMPT = """You evaluate AI-for-science papers for a researcher whose focus is Molecular Crystal Structure Prediction (MCSP) and AI for Science (AI4Sci) — broadly: ML potentials, generative models for molecules/materials, GNNs for chemistry, materials informatics, computational chemistry, foundation models for science.
 
 For each paper, return strict JSON (no prose) with these keys:
@@ -206,16 +283,13 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
             print(f"[screen] {item.get('id','?')} attempt {attempt+1}: "
                   f"{type(e).__name__}: {e}", file=sys.stderr)
 
-    # All attempts failed: keep the paper with neutral scores so we don't lose it.
-    print(f"[screen] {item.get('id','?')}: defaulting (last_text={last_text[:120]!r})",
-          file=sys.stderr)
-    return {
-        "relevance":    5,
-        "significance": 5,
-        "bucket":       "Other",
-        "tldr":         (item.get("title") or "")[:200],
-        "ok":           False,
-    }
+    # All LLM attempts failed. Compute a heuristic fallback from the
+    # abstract+title so the user gets *something* useful instead of a
+    # wall of identical 5/10 badges. Mark ok=False so the frontend can
+    # render the badge differently (or hide it).
+    print(f"[screen] {item.get('id','?')}: LLM failed; falling back to heuristic "
+          f"(last_text={last_text[:80]!r})", file=sys.stderr)
+    return _heuristic_screen(item)
 
 
 def should_keep(screen: dict) -> bool:
@@ -312,9 +386,11 @@ def main() -> int:
     survivors: list[dict] = []
     dropped:  list[dict] = []
     for item, screen in results:
-        # Attach screen to item for downstream use
+        # Attach screen to item for downstream use. Keep `ok` + `heuristic`
+        # flags so the frontend can render heuristic scores differently
+        # (or hide the badge) — they're not actual LLM judgments.
         item = dict(item)
-        item["screen"] = {k: v for k, v in screen.items() if k != "ok"}
+        item["screen"] = dict(screen)  # includes ok / heuristic when present
         # Override category bucket with the LLM's read of it
         item["categories"] = [screen["bucket"]] + [
             c for c in (item.get("raw_categories") or item.get("categories") or [])
