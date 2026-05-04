@@ -253,13 +253,25 @@ def main() -> int:
           f"thresholds rel>={SCREEN_MIN_RELEVANCE} sig>={SCREEN_MIN_SIGNIFICANCE} "
           f"(autokeep at rel>={SCREEN_RELEVANCE_AUTOKEEP})", file=sys.stderr)
 
-    # OpenAI client
+    # OpenAI client. Bail BEFORE constructing OpenAI() if no key — its
+    # constructor raises immediately rather than at first call, and a hard
+    # exit at this step would block the entire daily run. Pass-through so
+    # enhance.py still gets to summarize what we have.
     base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
     api_key  = os.environ.get("OPENAI_API_KEY")
     model    = os.environ.get("MODEL_NAME", "deepseek-chat")
-    client_kwargs = {}
+    if not api_key:
+        print("[screen] OPENAI_API_KEY not set — skipping screen step "
+              "(passing all papers through unchanged)", file=sys.stderr)
+        # Write the input back as the survivors file so downstream filenames work.
+        out_path = in_path.rsplit(".jsonl", 1)[0] + "_screened.jsonl"
+        with open(out_path, "w", encoding="utf-8") as f:
+            for it in items:
+                f.write(json.dumps(it, ensure_ascii=False) + "\n")
+        return 0
+
+    client_kwargs = {"api_key": api_key}
     if base_url: client_kwargs["base_url"] = base_url
-    if api_key:  client_kwargs["api_key"]  = api_key
     client = OpenAI(**client_kwargs)
     print(f"[screen] model={model} via {base_url or '(default openai)'}", file=sys.stderr)
 
@@ -281,6 +293,20 @@ def main() -> int:
                 screen = {"relevance": 5, "significance": 5, "bucket": "Other",
                           "tldr": items[i].get("title", "")[:200], "ok": False}
             results[i] = (items[i], screen)
+
+    # Sanity check: if more than half the LLM calls failed, the screen
+    # output is meaningless (every paper got the same default 5/5 score)
+    # and continuing would silently bypass the screen entirely AND make
+    # enhance.py spend tokens on the full set. Abort loudly instead.
+    n_failures = sum(1 for _, s in results if not s.get("ok"))
+    failure_rate = n_failures / max(1, len(results))
+    print(f"[screen] LLM call success: {len(results) - n_failures}/{len(results)} "
+          f"(failure rate {failure_rate:.0%})", file=sys.stderr)
+    if failure_rate > 0.5:
+        print(f"[screen] >50% of LLM calls failed — aborting so the daily "
+              f"feed isn't built on garbage scores. Check API key / quota / model name.",
+              file=sys.stderr)
+        return 2
 
     # Apply thresholds + safety floor
     survivors: list[dict] = []
