@@ -178,15 +178,19 @@ jobs:
             kept=$(wc -l < ../data/${today}.jsonl | tr -d ' ')
             echo "✅ screening kept $kept papers"
             echo "kept_after_screen=$kept" >> $GITHUB_OUTPUT
+            echo "has_kept=true" >> $GITHUB_OUTPUT
         elif [ $screen_rc -eq 1 ]; then
-            echo "⚠️  screen kept zero — keeping pre-screen file as-is so downstream can still run"
+            # Empty input or 100% rejection — don't proceed to enhance/publish
+            # (would emit empty AI-enhanced files that overwrite real data).
+            echo "ℹ️  screen kept zero — skipping enhance/convert/publish"
+            echo "has_kept=false" >> $GITHUB_OUTPUT
         else
             echo "❌ screen.py errored ($screen_rc); aborting"
             exit $screen_rc
         fi
 
     - name: AI Enhancement Processing
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -207,7 +211,7 @@ jobs:
         echo "AI enhancement complete"
         
     - name: Convert to Markdown
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -242,7 +246,7 @@ jobs:
     # historical files. Generating it here would only see today's file.
 
     - name: Generate password hash and inject into config
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         echo "🔐 Generating password hash for authentication..."
 
@@ -297,7 +301,7 @@ jobs:
         fi
         
     - name: Inject repository info into data-config.js
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         echo "注入仓库信息到 data-config.js... / Injecting repository info into data-config.js..."
         
@@ -319,7 +323,7 @@ jobs:
         fi
 
     - name: Commit code changes to main branch
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         git config --global user.email "${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
         git config --global user.name "${{ vars.NAME || 'Jade' }}"
@@ -341,7 +345,7 @@ jobs:
         fi
 
     - name: Push code changes to main branch
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
@@ -364,7 +368,7 @@ jobs:
         done
 
     - name: Prepare data files for data branch
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         echo "准备数据文件... / Preparing data files..."
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -385,7 +389,7 @@ jobs:
         echo "数据文件已保存到临时目录 / Data files saved to temporary directory"
 
     - name: Setup and commit to data branch
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         git config --global user.email "${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
         git config --global user.name "${{ vars.NAME || 'Jade' }}"
@@ -450,7 +454,7 @@ jobs:
         fi
 
     - name: Push data changes to data branch
-      if: steps.history_dedup.outputs.has_new == 'true'
+      if: steps.screen_step.outputs.has_kept == 'true'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
