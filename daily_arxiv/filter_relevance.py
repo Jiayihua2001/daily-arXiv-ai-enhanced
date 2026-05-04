@@ -42,6 +42,38 @@ def matches_any(text: str, keywords: list[str]) -> bool:
     return any(k in t for k in keywords)
 
 
+# Softfloor: when keyword matches alone produce too few papers, fall back
+# to scoring by source/category and keeping the top N. Better to LLM-summarize
+# 20 mostly-relevant papers than publish 0–3 strict matches.
+SOFTFLOOR_MIN = 20
+
+# Source/category preference ordering (higher = more likely to be in-scope).
+def _heuristic_score(item: dict) -> float:
+    score = 0.0
+    src = (item.get("source") or "").lower()
+    if src == "arxiv":
+        score += 1.0  # arxiv is already category-gated upstream
+    elif src == "openalex":
+        score += 0.7  # openalex is already keyword-gated upstream
+    cats = " ".join(str(c) for c in (item.get("categories") or [])).lower()
+    for hint, w in (
+        ("cond-mat.mtrl-sci", 1.5),
+        ("physics.chem-ph",   1.2),
+        ("cond-mat.soft",     1.0),
+        ("physics.comp-ph",   1.0),
+        ("q-bio.bm",          0.8),
+        ("crystal",           1.0),
+        ("polymorph",         1.0),
+        ("materials",         0.5),
+        ("chemistry",         0.4),
+        ("cs.lg",            -0.3),  # noisy without other signals
+        ("cs.ai",            -0.3),
+    ):
+        if hint in cats:
+            score += w
+    return score
+
+
 def main() -> int:
     today = datetime.utcnow().strftime("%Y-%m-%d")
     # When invoked from the workflow we cd into daily_arxiv/, so resolve
@@ -60,7 +92,7 @@ def main() -> int:
     print(f"[filter] loaded {len(keywords)} keywords from {kw_path}",
           file=sys.stderr)
 
-    kept, dropped = [], 0
+    all_items, kept, dropped = [], [], []
     with target.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -69,27 +101,39 @@ def main() -> int:
             try:
                 item = json.loads(line)
             except json.JSONDecodeError:
-                dropped += 1
                 continue
+            all_items.append(item)
             blob = " ".join(str(item.get(k, "")) for k in ("title", "summary"))
             if matches_any(blob, keywords):
                 kept.append(item)
             else:
-                dropped += 1
+                dropped.append(item)
 
-    total = len(kept) + dropped
-    print(f"[filter] {total} crawled -> {len(kept)} kept, {dropped} dropped",
-          file=sys.stderr)
+    total = len(all_items)
+    print(f"[filter] {total} crawled -> {len(kept)} keyword-matched, "
+          f"{len(dropped)} non-matching", file=sys.stderr)
+
+    # Softfloor: top up with heuristically-scored non-matches if we're below
+    # SOFTFLOOR_MIN. Means a sparse-keyword day still publishes ~20 items,
+    # which is what makes the daily reading feed feel alive.
+    if len(kept) < SOFTFLOOR_MIN and dropped:
+        need = SOFTFLOOR_MIN - len(kept)
+        scored = sorted(dropped, key=_heuristic_score, reverse=True)
+        topup = scored[:need]
+        kept.extend(topup)
+        print(f"[filter] softfloor: added {len(topup)} heuristically-ranked "
+              f"papers to reach {len(kept)} total", file=sys.stderr)
 
     if not kept:
-        # Don't overwrite with empty file; just signal stop.
-        print("[filter] zero matches — workflow will stop", file=sys.stderr)
+        print("[filter] zero papers from any source — workflow will stop",
+              file=sys.stderr)
         return 1
 
     with target.open("w", encoding="utf-8") as f:
         for item in kept:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
-    print(f"[filter] wrote filtered file: {target}", file=sys.stderr)
+    print(f"[filter] wrote filtered file: {target} ({len(kept)} papers)",
+          file=sys.stderr)
     return 0
 
 

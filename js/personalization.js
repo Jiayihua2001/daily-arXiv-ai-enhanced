@@ -336,6 +336,9 @@
 
   // ---- Hero banner ----------------------------------------------------------
   function buildHero() {
+    // Claude-style index.html sets this flag to skip the gradient hero —
+    // it provides its own .editorial-head + integrated date strip.
+    if (window.SUPPRESS_PERSONAL_HERO) return;
     const main = document.querySelector('main');
     if (!main || document.getElementById('personalHero')) return;
 
@@ -612,8 +615,10 @@
     }
 
     // Tweak the site title to subtly show personalization.
+    // Skip when the index already provides its own suffix (Claude-style page).
     const siteTitle = document.querySelector('.site-title');
-    if (siteTitle && !siteTitle.dataset.personalized) {
+    const alreadyHasSuffix = !!document.querySelector('.site-title-suffix');
+    if (siteTitle && !siteTitle.dataset.personalized && !alreadyHasSuffix) {
       siteTitle.dataset.personalized = '1';
       siteTitle.innerHTML = `Daily arXiv <span class="site-title-suffix">· MCSP × AI4Sci</span>`;
     }

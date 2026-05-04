@@ -411,6 +411,43 @@ def dedupe(items: Iterable[dict]) -> list[dict]:
     return out
 
 
+# Normalize the wildly-different category vocabularies (arXiv codes,
+# OpenAlex concepts, ChemRxiv categories) into a small set of buckets the
+# frontend can group by sensibly. The original raw list is preserved as
+# `raw_categories` for display.
+_BUCKETS = [
+    ("Materials",  ("cond-mat", "mtrl", "perovskite", "crystal", "polymorph",
+                    "lattice", "material", "framework", "zeolite", "powder",
+                    "solid", "amorphous")),
+    ("Chemistry",  ("chem", "molecul", "supramolec", "co-crystal", "cocrystal",
+                    "drug", "pharma", "synth", "catal")),
+    ("ML methods", ("machine learning", "neural network", "graph neural",
+                    "equivariant", "transformer", "diffusion", "generative",
+                    "potential", "force field", "mace", "nequip", "chgnet",
+                    "schnet", "alphafold", "cs.lg", "cs.ai", "stat.ml")),
+    ("Bio",        ("bio", "protein", "rna", "dna", "cell", "q-bio", "genom")),
+    ("Physics",    ("physics", "quantum", "phonon", "thermal", "phase")),
+]
+
+def _bucket_for(cats: list[str]) -> str:
+    blob = " ".join(str(c) for c in (cats or [])).lower()
+    for name, hints in _BUCKETS:
+        if any(h in blob for h in hints):
+            return name
+    return "Other"
+
+
+def normalize(items: list[dict]) -> list[dict]:
+    for it in items:
+        raw = it.get("categories") or []
+        bucket = _bucket_for(raw)
+        it["raw_categories"] = list(raw)
+        # Put the clean bucket FIRST so app.js's groupBy(categories[0]) does
+        # the right thing without changing app.js itself.
+        it["categories"] = [bucket] + [c for c in raw if c != bucket]
+    return items
+
+
 def main() -> int:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     out_path = Path("..") / "data" / f"{today}.jsonl"
@@ -443,7 +480,7 @@ def main() -> int:
         print(f"[fetch] {s}: {len(got)} items", file=sys.stderr)
         all_items.extend(got)
 
-    deduped = dedupe(all_items)
+    deduped = normalize(dedupe(all_items))
     print(f"[fetch] total={len(all_items)} deduped={len(deduped)} "
           f"per_source={per_source}", file=sys.stderr)
 

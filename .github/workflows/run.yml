@@ -182,12 +182,9 @@ jobs:
         fi
         echo "Markdown转换完成 / Markdown conversion completed"
         
-    - name: Update file list
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
-      run: |
-        echo "更新文件列表... / Updating file list..."
-        ls data/*.jsonl | sed 's|data/||' > assets/file-list.txt
-        echo "文件列表更新完成 / File list updated"
+    # NOTE: file-list.txt is now generated on the data branch (see "Setup
+    # and commit to data branch") so it includes today's file PLUS all
+    # historical files. Generating it here would only see today's file.
 
     - name: Generate password hash and inject into config
       if: steps.keyword_filter.outputs.has_relevant == 'true'
@@ -367,8 +364,13 @@ jobs:
         # 确保目录存在 / Ensure directories exist
         mkdir -p data assets
         cp -r /tmp/data_files/data/* data/ 2>/dev/null || true
-        cp /tmp/data_files/assets/file-list.txt assets/ 2>/dev/null || true
-        
+
+        # Rebuild file-list AFTER merging today's files with whatever is
+        # already on the data branch — otherwise we'd publish a list with
+        # only today's file and the frontend would lose access to history.
+        ls data/*.jsonl 2>/dev/null | sed 's|data/||' | sort > assets/file-list.txt
+        echo "📜 file-list.txt now contains $(wc -l < assets/file-list.txt | tr -d ' ') entries"
+
         # 只添加数据文件 / Only add data files
         git add data/* 2>/dev/null || true
         git add assets/file-list.txt 2>/dev/null || true
