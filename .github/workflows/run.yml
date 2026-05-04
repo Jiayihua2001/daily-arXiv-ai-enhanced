@@ -129,9 +129,31 @@ jobs:
           exit $filter_exit
         fi
 
+    - name: Drop already-processed papers (history dedup)
+      id: history_dedup
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      run: |
+        source .venv/bin/activate
+        echo "Checking against historically-processed paper IDs..."
+        cd daily_arxiv
+        set +e
+        python dedup_history.py
+        history_exit=$?
+        set -e
+        echo "history_exit=$history_exit"
+        if [ "$history_exit" -eq 1 ]; then
+          echo "has_new=false" >> $GITHUB_OUTPUT
+          echo "ℹ️  Every paper today was already processed; skipping all expensive steps."
+        elif [ "$history_exit" -eq 0 ]; then
+          echo "has_new=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_new=false" >> $GITHUB_OUTPUT
+          exit $history_exit
+        fi
+
     - name: LLM Pre-screen (relevance + significance)
       id: screen_step
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -164,7 +186,7 @@ jobs:
         fi
 
     - name: AI Enhancement Processing
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -185,7 +207,7 @@ jobs:
         echo "AI enhancement complete"
         
     - name: Convert to Markdown
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -220,7 +242,7 @@ jobs:
     # historical files. Generating it here would only see today's file.
 
     - name: Generate password hash and inject into config
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         echo "🔐 Generating password hash for authentication..."
 
@@ -275,7 +297,7 @@ jobs:
         fi
         
     - name: Inject repository info into data-config.js
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         echo "注入仓库信息到 data-config.js... / Injecting repository info into data-config.js..."
         
@@ -297,7 +319,7 @@ jobs:
         fi
 
     - name: Commit code changes to main branch
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         git config --global user.email "${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
         git config --global user.name "${{ vars.NAME || 'Jade' }}"
@@ -319,7 +341,7 @@ jobs:
         fi
 
     - name: Push code changes to main branch
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
@@ -342,23 +364,28 @@ jobs:
         done
 
     - name: Prepare data files for data branch
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         echo "准备数据文件... / Preparing data files..."
         today=${{ steps.crawl_step.outputs.crawl_date }}
-        
+
         # 创建临时目录保存数据文件 / Create temporary directory to save data files
         mkdir -p /tmp/data_files/data
         mkdir -p /tmp/data_files/assets
-        
+        mkdir -p /tmp/data_files/scripts
+
         # 复制数据文件到临时目录 / Copy data files to temporary directory
         cp -r data/* /tmp/data_files/data/ 2>/dev/null || true
         cp assets/file-list.txt /tmp/data_files/assets/ 2>/dev/null || true
-        
+
+        # Stash the seen-ids regen script — it lives on main but the data
+        # branch needs it after checkout (where main's files won't exist).
+        cp daily_arxiv/build_seen_ids.py /tmp/data_files/scripts/ 2>/dev/null || true
+
         echo "数据文件已保存到临时目录 / Data files saved to temporary directory"
 
     - name: Setup and commit to data branch
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         git config --global user.email "${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
         git config --global user.name "${{ vars.NAME || 'Jade' }}"
@@ -404,9 +431,15 @@ jobs:
         ls data/*.jsonl 2>/dev/null | sed 's|data/||' | sort > assets/file-list.txt
         echo "📜 file-list.txt now contains $(wc -l < assets/file-list.txt | tr -d ' ') entries"
 
+        # Rebuild seen_ids.txt — source of truth for what's been processed.
+        # Only papers that actually got summarized count as "seen". Script
+        # was stashed in the previous step (it lives on main, not data).
+        python3 /tmp/data_files/scripts/build_seen_ids.py
+
         # 只添加数据文件 / Only add data files
         git add data/* 2>/dev/null || true
         git add assets/file-list.txt 2>/dev/null || true
+        git add assets/seen_ids.txt 2>/dev/null || true
         
         # 检查是否有数据变更需要提交 / Check if there are data changes to commit
         if git diff --staged --quiet; then
@@ -417,7 +450,7 @@ jobs:
         fi
 
     - name: Push data changes to data branch
-      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      if: steps.history_dedup.outputs.has_new == 'true'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
