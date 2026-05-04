@@ -1692,26 +1692,32 @@ async function loadPapersByDateRange(startDate, endDate) {
   `;
   
   try {
-    // 加载所有日期的论文数据
+    // 加载所有日期的论文数据 + dedup across days by paper id.
+    // (Without this, a paper that appears in two daily files because of the
+    //  pipeline's 3-day lookback window shows up twice in range view.)
     const allPaperData = {};
-    
+    const seenIds = new Set();
+
     for (const date of validDatesInRange) {
       const selectedLanguage = selectLanguageForDate(date);
-      // 从 data 分支获取数据文件
       const dataUrl = DATA_CONFIG.getDataUrl(`data/${date}_AI_enhanced_${selectedLanguage}.jsonl`);
       const response = await fetch(dataUrl);
       const text = await response.text();
       const dataPapers = parseJsonlData(text, date);
-      
-      // 合并数据
+
       Object.keys(dataPapers).forEach(category => {
-        if (!allPaperData[category]) {
-          allPaperData[category] = [];
+        if (!allPaperData[category]) allPaperData[category] = [];
+        for (const p of dataPapers[category]) {
+          // Prefer arxiv id; fall back to title-prefix for non-arxiv items.
+          const key = (p.id ? String(p.id).toLowerCase() :
+                       (p.title || '').toLowerCase().slice(0, 120));
+          if (!key || seenIds.has(key)) continue;
+          seenIds.add(key);
+          allPaperData[category].push(p);
         }
-        allPaperData[category] = allPaperData[category].concat(dataPapers[category]);
       });
     }
-    
+
     paperData = allPaperData;
 
     const categories = getAllCategories(paperData);

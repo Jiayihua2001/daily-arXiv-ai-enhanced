@@ -59,7 +59,7 @@ LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "1"))
 OPENALEX_EMAIL = os.environ.get("OPENALEX_EMAIL", "zefengc@andrew.cmu.edu")
 SOURCES = [
     s.strip().lower()
-    for s in os.environ.get("SOURCES", "arxiv,openalex").split(",")
+    for s in os.environ.get("SOURCES", "arxiv,openalex,s2").split(",")
     if s.strip()
 ]
 USER_AGENT = (
@@ -355,6 +355,146 @@ def _abstract_from_inverted_index(inv: dict) -> str:
 
 
 # ============================================================================
+# Semantic Scholar — broad academic search across ~200M papers.
+# Free, no auth needed for moderate usage. We use the bulk-search endpoint
+# with a date filter and OR'd keyword query.
+# ============================================================================
+
+def fetch_semantic_scholar(keywords: list[str]) -> list[dict]:
+    """Semantic Scholar /paper/search/bulk. Free tier; no key needed for
+    light usage (1 RPS soft limit). Returns up to 1000 papers per query.
+    """
+    if not keywords:
+        return []
+
+    # Curated diverse seed query — cover several axes of MCSP × AI4Sci
+    # rather than 12 polymorph variants. S2 uses '|' for OR; multi-word
+    # terms MUST be quoted as phrases or they get AND-ed.
+    strong = [
+        "crystal structure prediction",
+        "molecular crystal",
+        "polymorph",
+        "machine learning potential",
+        "neural network potential",
+        "interatomic potential",
+        "graph neural network",
+        "equivariant",
+        "diffusion model",
+        "foundation model",
+        "materials discovery",
+        "molecular generation",
+        "molecular property prediction",
+        "density functional theory",
+        "molecular dynamics",
+        "perovskite",
+        "metal-organic framework",
+        "MACE",
+        "alphafold",
+        "inverse design",
+    ]
+    def _q(k: str) -> str:
+        return f'"{k}"' if " " in k else k
+    query = " | ".join(_q(k) for k in strong)
+
+    today = datetime.now(timezone.utc).date()
+    start = (today - timedelta(days=LOOKBACK_DAYS)).isoformat()
+
+    base = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
+    fields = "title,abstract,authors,externalIds,publicationDate,publicationVenue,openAccessPdf,fieldsOfStudy"
+
+    items: list[dict] = []
+    seen: set[str] = set()
+    token = None
+    pages = 0
+    max_pages = 5  # 5 * 1000 = 5000 papers max
+    while pages < max_pages:
+        params = {
+            "query": query,
+            "fields": fields,
+            "publicationDateOrYear": f"{start}:",  # from date onward
+            "sort": "publicationDate:desc",
+        }
+        if token:
+            params["token"] = token
+
+        try:
+            r = requests.get(
+                base, params=params,
+                headers={"User-Agent": USER_AGENT},
+                timeout=25,
+            )
+            if r.status_code == 429:
+                # Rate-limited; back off briefly and continue.
+                import time
+                print(f"[s2] rate-limited on page {pages}, sleeping 5s",
+                      file=sys.stderr)
+                time.sleep(5)
+                continue
+            r.raise_for_status()
+        except Exception as e:
+            print(f"[s2] page {pages} failed: {e}", file=sys.stderr)
+            break
+
+        body = r.json()
+        data = body.get("data") or []
+        if not data:
+            break
+
+        for w in data:
+            pid = w.get("paperId") or ""
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+
+            ext = w.get("externalIds") or {}
+            arxiv_id = ext.get("ArXiv")
+            doi = ext.get("DOI") or ""
+
+            # If we already have an arxiv id for this paper, prefer the
+            # arxiv-source path so dedup picks the richer arxiv item.
+            paper_id = f"arxiv:{arxiv_id}" if arxiv_id else f"s2:{pid}"
+
+            authors = [a.get("name", "") for a in (w.get("authors") or [])]
+            authors = [a for a in authors if a]
+            venue = (w.get("publicationVenue") or {}).get("name", "") or ""
+            fos = [f.get("category") for f in (w.get("fieldsOfStudy") or []) if isinstance(f, dict)]
+            fos = [f for f in fos if f] or list(w.get("fieldsOfStudy") or [])
+
+            pdf_obj = w.get("openAccessPdf") or {}
+            pdf_url = pdf_obj.get("url") if isinstance(pdf_obj, dict) else None
+            if not pdf_url and arxiv_id:
+                pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+
+            if arxiv_id:
+                landing = f"https://arxiv.org/abs/{arxiv_id}"
+            elif doi:
+                landing = f"https://doi.org/{doi}"
+            else:
+                landing = f"https://www.semanticscholar.org/paper/{pid}"
+
+            items.append({
+                "id":         paper_id,
+                "categories": ([venue] if venue else []) + fos[:5],
+                "pdf":        pdf_url,
+                "abs":        landing,
+                "authors":    authors,
+                "title":      _collapse_ws(w.get("title") or ""),
+                "comment":    venue or None,
+                "summary":    _collapse_ws(w.get("abstract") or ""),
+                "source":     "s2",
+            })
+
+        token = body.get("token")
+        pages += 1
+        if not token:
+            break
+
+    print(f"[s2] returned {len(items)} papers across {pages} page(s)",
+          file=sys.stderr)
+    return items
+
+
+# ============================================================================
 # bioRxiv — optional, off by default
 # ============================================================================
 
@@ -419,14 +559,58 @@ def _matches_keywords(paper: dict, keywords: list[str]) -> bool:
     return any(k.lower() in blob for k in keywords)
 
 
+def _norm_title(t: str) -> str:
+    # Aggressive normalize for cross-source title matching: lowercase,
+    # collapse whitespace, strip punctuation, drop trailing periods.
+    s = (t or "").lower()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:200]
+
+def _arxiv_base_id(s: str) -> str:
+    # Strip version suffix from arxiv ids ('2401.00123v2' -> '2401.00123').
+    return re.sub(r"v\d+$", "", str(s or "").lower())
+
+def _doi_of(item: dict) -> str:
+    # OpenAlex puts DOI in 'doi' field; ChemRxiv embeds in 'abs'/id.
+    abs_url = (item.get("abs") or "").lower()
+    if "doi.org/" in abs_url:
+        return abs_url.split("doi.org/", 1)[1].split("?")[0].rstrip("/")
+    return ""
+
 def dedupe(items: Iterable[dict]) -> list[dict]:
-    seen: set[str] = set()
+    """Dedupe across sources. A paper is the same paper if any of these match:
+       - normalized title prefix
+       - arxiv base id (without version)
+       - DOI
+    arXiv items win over OpenAlex/ChemRxiv when both have the same paper —
+    arXiv has the abstract, the PDF link, and clean categories.
+    """
+    seen_titles: set[str] = set()
+    seen_arxiv: set[str] = set()
+    seen_dois: set[str] = set()
+    # Pre-pass: index arxiv items first so they're preferred on collisions.
+    items_list = list(items)
+    items_list.sort(key=lambda i: 0 if (i.get("source") == "arxiv") else 1)
+
     out: list[dict] = []
-    for it in items:
-        key = (it.get("title") or "").strip().lower()[:200]
-        if not key or key in seen:
+    for it in items_list:
+        title_key = _norm_title(it.get("title", ""))
+        if not title_key:
             continue
-        seen.add(key)
+        arxiv_key = ""
+        src = (it.get("source") or "").lower()
+        if src == "arxiv":
+            arxiv_key = _arxiv_base_id(it.get("id", ""))
+        doi_key = _doi_of(it)
+
+        if title_key in seen_titles:        continue
+        if arxiv_key and arxiv_key in seen_arxiv:  continue
+        if doi_key and doi_key in seen_dois:       continue
+
+        seen_titles.add(title_key)
+        if arxiv_key: seen_arxiv.add(arxiv_key)
+        if doi_key:   seen_dois.add(doi_key)
         out.append(it)
     return out
 
@@ -482,6 +666,7 @@ def main() -> int:
         "chemrxiv": lambda: fetch_chemrxiv(keywords),
         "openalex": lambda: fetch_openalex(keywords),
         "biorxiv":  lambda: fetch_biorxiv(keywords),
+        "s2":       lambda: fetch_semantic_scholar(keywords),
     }
 
     all_items: list[dict] = []

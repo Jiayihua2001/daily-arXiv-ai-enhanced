@@ -41,7 +41,7 @@ jobs:
         export TOKEN_GITHUB=${{ secrets.TOKEN_GITHUB }}
         export CATEGORIES="${{ vars.CATEGORIES || 'cond-mat.mtrl-sci,cond-mat.soft,cond-mat.dis-nn,cond-mat.stat-mech,physics.chem-ph,physics.comp-ph,physics.atm-clus,physics.bio-ph,cs.LG,cs.AI,cs.CE,stat.ML,q-bio.BM,q-bio.QM' }}"
         export LOOKBACK_DAYS="${{ vars.LOOKBACK_DAYS || '3' }}"
-        export SOURCES="${{ vars.SOURCES || 'arxiv,openalex' }}"
+        export SOURCES="${{ vars.SOURCES || 'arxiv,openalex,s2' }}"
         export OPENALEX_EMAIL="${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
 
         cd daily_arxiv

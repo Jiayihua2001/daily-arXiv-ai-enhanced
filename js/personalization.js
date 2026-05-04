@@ -14,54 +14,25 @@
     displayName: 'Jade',
     affiliation: 'Carnegie Mellon University',
     fields: ['Molecular Crystal Structure Prediction', 'AI for Science'],
-    // Broader seed list for v3 — every term should still be a strong
-    // MCSP / materials / ML-for-chemistry signal. Users can edit/remove
-    // freely in Settings. The full filter list is in keywords.yaml on
-    // the pipeline side; this is the subset surfaced as hero chips.
+    // Slimmed default chip list (v6): 12 BROAD terms, picked so every
+    // term covers a wide swath of papers without overlapping the others.
+    // The pipeline-side keywords.yaml is what filters at fetch time; this
+    // shorter list is just the chips you see on the page for sort+highlight.
     defaultKeywords: [
-      // core MCSP
       'crystal structure prediction',
-      'molecular crystal',
-      'crystal polymorph',
-      'polymorph selection',
-      'polymorph stability',
-      'pharmaceutical co-crystal',
-      'molecular co-crystal',
-      'co-crystal formation',
-      'lattice energy',
-      'structure search',
-      'molecular packing',
-      'crystal packing',
-      'crystal engineering',
-      'space group',
-      'pharmaceutical crystal',
-      // adjacent materials
-      'metal-organic framework',
-      'covalent organic framework',
-      'perovskite',
-      // ML for materials
-      'machine learning potential',
-      'neural network potential',
-      'interatomic potential',
-      'equivariant neural network',
-      'inverse design',
-      'materials discovery',
-      'molecular generation',
-      'crystal generation',
-      'generative chemistry',
-      // specific frameworks (high precision signals)
-      'MACE',
-      'NequIP',
-      'M3GNet',
-      'CHGNet',
-      // computational chemistry
+      'polymorph',
+      'co-crystal',
+      'molecular dynamics',
       'density functional theory',
-      'ab initio molecular dynamics',
-      'molecular dynamics simulation'
+      'machine learning potential',
+      'graph neural network',
+      'equivariant',
+      'diffusion model',
+      'foundation model',
+      'materials discovery',
+      'molecular generation'
     ],
-    // Bump the version when the default list changes — existing visitors
-    // who haven't customized get migrated to the new list.
-    seedFlag: 'mcsp_defaults_seeded_v5'
+    seedFlag: 'mcsp_defaults_seeded_v6'
   };
 
   // ---- Data-source fallback + topical keyword filter shim ------------------
@@ -123,10 +94,14 @@
   // would 404.
   if (!window.__personalizationUrls) window.__personalizationUrls = new Map();
 
-  function _filterJsonlByKeywords(text, keywords) {
+  // Keep ALL papers from the user's own pipeline (it already filtered). The
+  // only thing we still drop on upstream-fallback feeds is items that don't
+  // match any user keyword — there the data isn't tailored to MCSP at all.
+  // We always rewrite Chinese AI summaries to English abstracts.
+  function _processJsonlForUser(text, keywords, isUserOwnFeed) {
     if (!text) return { text, kept: null, total: null };
     const lines = text.split('\n');
-    const kept = [];
+    const out = [];
     let total = 0;
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -134,11 +109,8 @@
       let obj;
       try { obj = JSON.parse(line); } catch (e) { continue; }
 
-      // Always strip Chinese AI summaries (whether or not we filter).
       const cleaned = _swapChineseAIWithEnglishAbstract(obj);
 
-      // Capture URLs in the global map keyed by id. The id may be
-      // 'openalex:W...', 'chemrxiv:...', or a bare arxiv id like '2604.X'.
       if (cleaned.id) {
         window.__personalizationUrls.set(cleaned.id, {
           abs: cleaned.abs || null,
@@ -147,7 +119,11 @@
         });
       }
 
-      if (keywords && keywords.length) {
+      // Hard filter ONLY on the upstream-fallback feed (which is generic
+      // CS/AI papers irrelevant to MCSP). On the user's own pipeline data,
+      // we trust the server-side filter and keep everything; the keyword
+      // chips on the page are just for sorting/highlighting.
+      if (!isUserOwnFeed && keywords && keywords.length) {
         const ai = cleaned.AI || {};
         const blob = (
           (cleaned.title || '') + ' ' +
@@ -157,13 +133,9 @@
         ).toLowerCase();
         if (!keywords.some(k => blob.includes(k))) continue;
       }
-      kept.push(JSON.stringify(cleaned));
+      out.push(JSON.stringify(cleaned));
     }
-    return {
-      text: kept.join('\n'),
-      kept: kept.length,
-      total: total
-    };
+    return { text: out.join('\n'), kept: out.length, total: total };
   }
 
   function _looksLikeJsonlData(url) {
@@ -211,32 +183,21 @@
           const kws  = _userKeywordsLower();
           const text = await r.clone().text();
           const isUserOwnData = url.startsWith(primaryBase);
-          const result = _filterJsonlByKeywords(text, kws);
-
-          // If filtering own-pipeline data would erase everything, fall
-          // back to the rewritten-but-unfiltered text so the user still
-          // sees the papers their own pipeline curated.
-          let outText = result.text;
-          let didClientFilter = true;
-          if (isUserOwnData && result.kept === 0 && result.total > 0) {
-            const passthrough = _filterJsonlByKeywords(text, []);
-            outText = passthrough.text;
-            didClientFilter = false;
-          }
+          const result = _processJsonlForUser(text, kws, isUserOwnData);
 
           console.info(
             `[personalization] feed=${isUserOwnData ? 'own' : 'fallback'}` +
-            ` total=${result.total} kept=${didClientFilter ? result.kept : result.total}` +
-            (didClientFilter ? '' : ' (client filter zeroed; showing pipeline-filtered set)')
+            ` total=${result.total} kept=${result.kept}` +
+            (isUserOwnData ? ' (own feed: no client filter, all kept)' : '')
           );
           window.__personalizationLastFilter = {
-            kept: didClientFilter ? result.kept : result.total,
+            kept: result.kept,
             total: result.total,
-            clientFilterApplied: didClientFilter,
+            clientFilterApplied: !isUserOwnData,
             feed: isUserOwnData ? 'own' : 'fallback',
             date: new Date().toISOString()
           };
-          return new Response(outText, {
+          return new Response(result.text, {
             status: r.status,
             statusText: r.statusText,
             headers: r.headers
@@ -293,6 +254,23 @@
     'density functional theory','ab initio molecular dynamics',
     'molecular dynamics simulation'
   ];
+  // V5 was the 34-term hyper-specific list — tons of near-dups (3 polymorph
+  // variants, 3 co-crystal variants, 3 potential variants). v6 collapses
+  // to 12 broad terms.
+  const V5_DEFAULTS = [
+    'crystal structure prediction','molecular crystal','crystal polymorph',
+    'polymorph selection','polymorph stability','pharmaceutical co-crystal',
+    'molecular co-crystal','co-crystal formation','lattice energy',
+    'structure search','molecular packing','crystal packing',
+    'crystal engineering','space group','pharmaceutical crystal',
+    'metal-organic framework','covalent organic framework','perovskite',
+    'machine learning potential','neural network potential',
+    'interatomic potential','equivariant neural network','inverse design',
+    'materials discovery','molecular generation','crystal generation',
+    'generative chemistry','MACE','NequIP','M3GNet','CHGNet',
+    'density functional theory','ab initio molecular dynamics',
+    'molecular dynamics simulation'
+  ];
   function arraysEqual(a, b) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
     return a.every((v, i) => v === b[i]);
@@ -304,19 +282,21 @@
       try { saved = JSON.parse(localStorage.getItem('preferredKeywords') || '[]'); }
       catch (_) { saved = []; }
 
-      const isFresh        = !saved.length;
-      const isStockV1      = arraysEqual(saved, V1_DEFAULTS);
-      const isStockV2      = arraysEqual(saved, V2_DEFAULTS);
-      const isStockV3      = arraysEqual(saved, V3_DEFAULTS);
-      const isStockV4      = arraysEqual(saved, V4_DEFAULTS);
-      const needsMigration = !seedDoneAt && (isFresh || isStockV1 || isStockV2 || isStockV3 || isStockV4);
+      const isFresh   = !saved.length;
+      const isStockV1 = arraysEqual(saved, V1_DEFAULTS);
+      const isStockV2 = arraysEqual(saved, V2_DEFAULTS);
+      const isStockV3 = arraysEqual(saved, V3_DEFAULTS);
+      const isStockV4 = arraysEqual(saved, V4_DEFAULTS);
+      const isStockV5 = arraysEqual(saved, V5_DEFAULTS);
+      const needsMigration = !seedDoneAt &&
+        (isFresh || isStockV1 || isStockV2 || isStockV3 || isStockV4 || isStockV5);
 
       if (needsMigration) {
         localStorage.setItem('preferredKeywords',
           JSON.stringify(PROFILE.defaultKeywords));
         localStorage.setItem(PROFILE.seedFlag, '1');
-        if (isStockV1 || isStockV2 || isStockV3 || isStockV4) {
-          console.info(`[personalization] migrated stock keyword list → v5 (sharper co-crystal/solid-form terms; ${PROFILE.defaultKeywords.length} terms)`);
+        if (!isFresh) {
+          console.info(`[personalization] migrated stock keyword list → v6 (12 broader terms; killed near-duplicates)`);
         }
       }
     } catch (e) {
