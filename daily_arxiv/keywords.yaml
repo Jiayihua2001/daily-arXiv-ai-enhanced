@@ -132,3 +132,70 @@ keywords:
   - thermodynamic stability
   - kinetic stability
   - free energy calculation
+
+  # ============= Tier 6: broader AI4Science net (added 2026-05) ============
+  # Goal: catch papers that are clearly ML-for-science but don't drop a tier-1
+  # term in the abstract. Each term should still imply science/chemistry/
+  # materials context, not generic ML.
+  - molecular property prediction
+  - molecular property
+  - chemical property prediction
+  - materials property prediction
+  - materials informatics
+  - materials genome
+  - high-throughput screening
+  - virtual screening
+  - drug discovery
+  - molecular design
+  - chemical space
+  - reaction prediction
+  - retrosynthesis
+  - protein structure
+  - protein folding
+  - protein design
+  - protein-ligand
+  - molecular docking
+  - molecular embedding
+  - chemical embedding
+  - smiles
+  - fingerprint
+  - 3D molecular
+  - 3d structure prediction
+  - diffusion model for molecules
+  - diffusion model for crystals
+  - flow matching molecule
+  - flow matching crystal
+  - transformer for chemistry
+  - transformer for materials
+  - foundation model for chemistry
+  - foundation model for materials
+  - foundation model for molecules
+  - pretrained molecular
+  - self-supervised molecular
+  - active learning materials
+  - active learning chemistry
+  - bayesian optimization materials
+  - reinforcement learning chemistry
+  - autoregressive molecule
+  - graph transformer
+  - GNN molecule
+  - GNN material
+  - GNN crystal
+  - SE(3) transformer
+  - point cloud molecule
+  - 3d point cloud crystal
+  - simulation surrogate
+  - neural surrogate
+  - learned simulator
+  - molecular simulation
+  - quantum chemistry
+  - quantum machine learning
+  - kohn-sham
+  - exchange-correlation
+  - solvation free energy
+  - binding affinity
+  - retrieval augmented chemistry
+  - benchmark chemistry
+  - benchmark materials
+  - dataset materials
+  - dataset chemistry

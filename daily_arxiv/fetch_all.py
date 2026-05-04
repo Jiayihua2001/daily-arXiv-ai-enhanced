@@ -44,9 +44,16 @@ from urllib.parse import quote_plus
 import requests
 
 # ----- config --------------------------------------------------------------
+# Wider net: every arxiv category that regularly publishes MCSP / AI-for-
+# materials / AI-for-chemistry work. Kept the ML categories (cs.LG, cs.AI,
+# stat.ML) because that's where most "ML method applied to molecules" papers
+# actually land. We rely on the relevance filter downstream — but loosely,
+# so plenty makes it through.
 DEFAULT_CATEGORIES = (
-    "cond-mat.mtrl-sci,physics.chem-ph,physics.comp-ph,cond-mat.soft,"
-    "cs.LG,cs.AI,q-bio.BM"
+    "cond-mat.mtrl-sci,cond-mat.soft,cond-mat.dis-nn,cond-mat.stat-mech,"
+    "physics.chem-ph,physics.comp-ph,physics.atm-clus,physics.bio-ph,"
+    "cs.LG,cs.AI,cs.CE,stat.ML,"
+    "q-bio.BM,q-bio.QM"
 )
 LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "1"))
 OPENALEX_EMAIL = os.environ.get("OPENALEX_EMAIL", "zefengc@andrew.cmu.edu")
@@ -94,13 +101,21 @@ def fetch_arxiv() -> list[dict]:
         return []
 
     cat_clause = " OR ".join(f"cat:{c}" for c in cats)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
+    # CRITICAL: use a calendar-day cutoff, not a clock-time cutoff.
+    # `now - timedelta(days=N)` rolls forward minute-by-minute, so at 17:44
+    # today the cutoff is N-days-ago at 17:44 — and the iterator breaks the
+    # moment it sees a paper from a few minutes earlier. That bug had us
+    # capturing ~2-4 papers per day instead of hundreds.
+    now_utc = datetime.now(timezone.utc)
+    cutoff = (now_utc - timedelta(days=LOOKBACK_DAYS)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
 
     def _try_fetch():
-        client = arxiv.Client(page_size=100, delay_seconds=4.0, num_retries=8)
+        client = arxiv.Client(page_size=200, delay_seconds=3.0, num_retries=8)
         search = arxiv.Search(
             query=cat_clause,
-            max_results=600,
+            max_results=2000,   # wider net; the lookback-cutoff still bounds it
             sort_by=arxiv.SortCriterion.SubmittedDate,
             sort_order=arxiv.SortOrder.Descending,
         )
@@ -153,7 +168,9 @@ def fetch_chemrxiv(keywords: list[str]) -> list[dict]:
     unless run from a residential IP with cookies. Prefer the OpenAlex
     source for ChemRxiv coverage."""
     base = "https://chemrxiv.org/engage/chemrxiv/public-api/v1/items"
-    cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
 
     items: list[dict] = []
     # ChemRxiv has no built-in date filter, so we page through "latest" and
@@ -252,17 +269,20 @@ def fetch_openalex(keywords: list[str]) -> list[dict]:
         "molecular packing", "perovskite", "interatomic", "force field",
         "metadynamics", "ab initio", "density functional",
         "machine learning potential", "neural network potential",
+        "graph neural", "equivariant", "diffusion model",
+        "molecular generation", "materials discovery", "inverse design",
+        "molecular property", "molecular dynamics",
     ))]
     if not strong:
-        strong = keywords[:8]
+        strong = keywords[:16]
     # OpenAlex search filter accepts ' OR ' between phrases.
-    search = " OR ".join(f'"{k}"' for k in strong[:12])
+    search = " OR ".join(f'"{k}"' for k in strong[:20])
 
     items: list[dict] = []
     seen: set[str] = set()
     cursor = "*"
     pages = 0
-    max_pages = 4  # ~ 4 * 50 = 200 papers max; usually plenty
+    max_pages = 12  # ~ 12 * 50 = 600 papers max
     while cursor and pages < max_pages:
         params = {
             "search": search,

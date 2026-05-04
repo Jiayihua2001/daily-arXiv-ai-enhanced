@@ -42,10 +42,15 @@ def matches_any(text: str, keywords: list[str]) -> bool:
     return any(k in t for k in keywords)
 
 
-# Softfloor: when keyword matches alone produce too few papers, fall back
-# to scoring by source/category and keeping the top N. Better to LLM-summarize
-# 20 mostly-relevant papers than publish 0–3 strict matches.
-SOFTFLOOR_MIN = 20
+# Filter philosophy:
+#   * arXiv items came in via category-gated query (cond-mat.mtrl-sci, cs.LG…)
+#     — they are ALREADY plausibly relevant. Never drop them.
+#   * OpenAlex / ChemRxiv items are search-gated, but the search uses broad
+#     OR'd terms, so kw-overlap is the main relevance signal.
+#   * If the resulting set is still small, top up with the highest-scoring
+#     non-matches so the daily feed feels alive.
+SOFTFLOOR_MIN = 60   # was 20 — user wants comprehensive coverage
+ARXIV_KEEP_ALL = True  # drop the substring gate for arXiv items entirely
 
 # Source/category preference ordering (higher = more likely to be in-scope).
 def _heuristic_score(item: dict) -> float:
@@ -93,6 +98,7 @@ def main() -> int:
           file=sys.stderr)
 
     all_items, kept, dropped = [], [], []
+    arxiv_passthrough = 0
     with target.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -103,15 +109,25 @@ def main() -> int:
             except json.JSONDecodeError:
                 continue
             all_items.append(item)
+            src = (item.get("source") or "").lower()
             blob = " ".join(str(item.get(k, "")) for k in ("title", "summary"))
+
+            # arXiv items are already category-gated upstream — never drop them.
+            if ARXIV_KEEP_ALL and src == "arxiv":
+                kept.append(item)
+                arxiv_passthrough += 1
+                continue
+
             if matches_any(blob, keywords):
                 kept.append(item)
             else:
                 dropped.append(item)
 
     total = len(all_items)
-    print(f"[filter] {total} crawled -> {len(kept)} keyword-matched, "
-          f"{len(dropped)} non-matching", file=sys.stderr)
+    print(f"[filter] {total} crawled -> {len(kept)} kept "
+          f"(arxiv passthrough={arxiv_passthrough}, "
+          f"keyword-matched non-arxiv={len(kept) - arxiv_passthrough}), "
+          f"{len(dropped)} dropped", file=sys.stderr)
 
     # Softfloor: top up with heuristically-scored non-matches if we're below
     # SOFTFLOOR_MIN. Means a sparse-keyword day still publishes ~20 items,
