@@ -917,6 +917,7 @@ function parseJsonlData(jsonlText, date) {
       
       const summary = paper.AI && paper.AI.tldr ? paper.AI.tldr : paper.summary;
       
+      const screen = paper.screen || {};
       result[primaryCategory].push({
         title: paper.title,
         url: paper.abs || paper.pdf || `https://arxiv.org/abs/${paper.id}`,
@@ -932,7 +933,11 @@ function parseJsonlData(jsonlText, date) {
         conclusion: paper.AI && paper.AI.conclusion ? paper.AI.conclusion : '',
         code_url: paper.code_url || '',
         code_stars: paper.code_stars || 0,
-        code_last_update: paper.code_last_update || ''
+        code_last_update: paper.code_last_update || '',
+        // Pre-screen scores (added 2026-05; absent on older days)
+        relevance: typeof screen.relevance === 'number' ? screen.relevance : null,
+        significance: typeof screen.significance === 'number' ? screen.significance : null,
+        screen_tldr: screen.tldr || ''
       });
     } catch (error) {
       console.error('解析JSON行失败:', error, line);
@@ -1113,6 +1118,15 @@ function renderPapers() {
   
   // 创建匹配论文的集合
   let filteredPapers = [...papers];
+
+  // Default sort: by composite (significance + relevance) descending. Papers
+  // without scores fall to the bottom. Subsequent keyword/text-search sorts
+  // below this then re-order based on match.
+  filteredPapers.sort((a, b) => {
+    const scA = (a.significance || 0) + (a.relevance || 0);
+    const scB = (b.significance || 0) + (b.relevance || 0);
+    return scB - scA;
+  });
 
   // 重置所有论文的匹配状态，避免上次渲染的残留
   filteredPapers.forEach(p => {
@@ -1399,9 +1413,21 @@ function renderPapers() {
     //   `;
     // }
 
+    // Score badge: only show if the paper has been pre-screened (newer pipeline).
+    let scoreBadge = '';
+    if (paper.significance != null && paper.relevance != null) {
+      const sig = paper.significance, rel = paper.relevance;
+      const tier = sig >= 8 ? 'high' : sig >= 6 ? 'mid' : 'low';
+      scoreBadge = `<div class="score-badge score-${tier}" title="LLM relevance ${rel}/10 · significance ${sig}/10">
+        <span class="score-num">${sig}</span>
+        <span class="score-suffix">/10</span>
+      </div>`;
+    }
+
     paperCard.innerHTML = `
       <div class="paper-card-index">${index + 1}</div>
-      ${paper.isMatched ? '<div class="match-badge" title="匹配您的搜索条件"></div>' : ''}
+      ${scoreBadge}
+      ${paper.isMatched ? '<div class="match-badge" title="Matches your filters"></div>' : ''}
       <div class="paper-card-header">
         <h3 class="paper-card-title">${highlightedTitle}</h3>
         <p class="paper-card-authors">${formattedAuthors}</p>

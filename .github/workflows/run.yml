@@ -129,13 +129,47 @@ jobs:
           exit $filter_exit
         fi
 
+    - name: LLM Pre-screen (relevance + significance)
+      id: screen_step
+      if: steps.keyword_filter.outputs.has_relevant == 'true'
+      run: |
+        source .venv/bin/activate
+        today=${{ steps.crawl_step.outputs.crawl_date }}
+        echo "Pre-screening papers with cheap LLM call..."
+
+        cd ai
+        export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+        export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}"
+        export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
+        # Tunable thresholds (defaults: rel>=5 sig>=4, autokeep at rel>=8)
+        export SCREEN_MIN_RELEVANCE="${{ vars.SCREEN_MIN_RELEVANCE || '5' }}"
+        export SCREEN_MIN_SIGNIFICANCE="${{ vars.SCREEN_MIN_SIGNIFICANCE || '4' }}"
+        export SCREEN_RELEVANCE_AUTOKEEP="${{ vars.SCREEN_RELEVANCE_AUTOKEEP || '8' }}"
+        export SCREEN_MAX_WORKERS="${{ vars.SCREEN_MAX_WORKERS || '12' }}"
+
+        set +e
+        python screen.py --data ../data/${today}.jsonl
+        screen_rc=$?
+        set -e
+
+        if [ $screen_rc -eq 0 ]; then
+            kept=$(wc -l < ../data/${today}.jsonl | tr -d ' ')
+            echo "✅ screening kept $kept papers"
+            echo "kept_after_screen=$kept" >> $GITHUB_OUTPUT
+        elif [ $screen_rc -eq 1 ]; then
+            echo "⚠️  screen kept zero — keeping pre-screen file as-is so downstream can still run"
+        else
+            echo "❌ screen.py errored ($screen_rc); aborting"
+            exit $screen_rc
+        fi
+
     - name: AI Enhancement Processing
       if: steps.keyword_filter.outputs.has_relevant == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
-        echo "开始AI增强处理... / Starting AI enhancement processing..."
-        
+        echo "Running expensive 5-field summary on screened survivors..."
+
         cd ai
         export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
         export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}"
@@ -143,13 +177,12 @@ jobs:
         export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
 
         python enhance.py --data ../data/${today}.jsonl
-        
-        # 检查AI处理是否成功 / Check if AI processing was successful
+
         if [ $? -ne 0 ]; then
-            echo "AI处理失败 / AI processing failed"
+            echo "AI processing failed"
             exit 1
         fi
-        echo "AI增强处理完成 / AI enhancement processing completed"
+        echo "AI enhancement complete"
         
     - name: Convert to Markdown
       if: steps.keyword_filter.outputs.has_relevant == 'true'
