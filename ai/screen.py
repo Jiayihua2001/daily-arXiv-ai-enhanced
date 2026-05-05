@@ -197,6 +197,9 @@ def _coerce_bucket(v: Any) -> str:
     return "Other"
 
 
+from llm_compat import chat_create as _chat_create  # noqa: E402
+
+
 def screen_one(client: OpenAI, model: str, item: dict) -> dict:
     """Return a screen dict; on error returns a permissive default that keeps the paper."""
     title = (item.get("title") or "").strip()
@@ -225,14 +228,15 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
         {},
     ]):
         try:
-            resp = client.chat.completions.create(
+            resp = _chat_create(
+                client,
                 model=model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user",   "content": user_prompt},
                 ],
                 temperature=0.0,
-                max_tokens=320,   # ~enough for the JSON + transfer_note line
+                max_tokens=320,   # auto-translated to max_completion_tokens for gpt-5/o-series
                 **kwargs_extra,
             )
             text = resp.choices[0].message.content or ""
@@ -340,7 +344,8 @@ def main() -> int:
     # Last-known failure: MODEL_NAME=deepseek-reasoner returned 404 on every
     # one of 278 papers (~20s wasted). This catches it in under 2s.
     try:
-        _ = client.chat.completions.create(
+        _ = _chat_create(
+            client,
             model=model,
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=1,

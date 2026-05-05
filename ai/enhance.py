@@ -22,6 +22,7 @@ from langchain.prompts import (
 )
 from structure import Structure
 from openai import OpenAI
+from llm_compat import chat_create as _chat_create
 
 if os.path.exists('.env'):
     dotenv.load_dotenv()
@@ -64,7 +65,8 @@ def _llm_json(client: OpenAI, model_name: str, system_prompt: str, user_prompt: 
         {},
     ]):
         try:
-            resp = client.chat.completions.create(
+            resp = _chat_create(
+                client,
                 model=model_name,
                 messages=[
                     {"role": "system",  "content": sys_with_json},
