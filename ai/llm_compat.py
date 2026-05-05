@@ -60,6 +60,19 @@ def chat_create(client, **kwargs):
                 kwargs.pop("response_format", None)
                 continue
 
+            # "model output limit reached" — reasoning models (gpt-5/o-series)
+            # consume internal reasoning_tokens before output. If our budget
+            # was tiny, bump it 4x and retry, capping at 4096 to avoid runaway.
+            if (("model output limit" in msg)
+                    or ("max_tokens" in msg and "reached" in msg)
+                    or ("max_completion_tokens" in msg and "reached" in msg)):
+                key = "max_completion_tokens" if "max_completion_tokens" in kwargs else "max_tokens"
+                current = kwargs.get(key, 100)
+                new_val = min(max(current * 4, 256), 4096)
+                if new_val > current:
+                    kwargs[key] = new_val
+                    continue
+
             # Not a known parameter migration — propagate the error
             raise
 

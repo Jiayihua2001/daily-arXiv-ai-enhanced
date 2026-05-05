@@ -236,7 +236,10 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
                     {"role": "user",   "content": user_prompt},
                 ],
                 temperature=0.0,
-                max_tokens=320,   # auto-translated to max_completion_tokens for gpt-5/o-series
+                # Reasoning models (gpt-5/o-series) burn ~200-500 internal
+                # tokens before output, so the JSON-output budget needs
+                # headroom. 1200 = safe for both reasoning + 30-word JSON.
+                max_tokens=1200,
                 **kwargs_extra,
             )
             text = resp.choices[0].message.content or ""
@@ -344,11 +347,14 @@ def main() -> int:
     # Last-known failure: MODEL_NAME=deepseek-reasoner returned 404 on every
     # one of 278 papers (~20s wasted). This catches it in under 2s.
     try:
+        # 32 tokens — reasoning models (gpt-5/o-series) consume internal
+        # tokens before producing output, so max_tokens=1 fails with
+        # "model output limit reached" even when the model is fine.
         _ = _chat_create(
             client,
             model=model,
             messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
+            max_tokens=32,
             temperature=0.0,
         )
         print(f"[screen] preflight OK", file=sys.stderr)
