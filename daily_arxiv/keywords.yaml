@@ -1,201 +1,236 @@
-# Topical pre-filter for the daily pipeline (MCSP × AI4Sci).
+# MCSP × AI4Sci pre-filter keywords (rewritten 2026-05).
 #
-# A paper is KEPT if its title or abstract contains ANY of the substrings
-# below (case-insensitive). The list aims for breadth without dragging in
-# unrelated cs.LG noise — every term should be a strong signal that the
-# paper is about molecular/crystal structures, materials chemistry, or
-# ML-for-chemistry/materials specifically.
+# A paper is KEPT for downstream LLM screening if its title or abstract
+# substring-matches ANY of these (case-insensitive). The list intentionally
+# overshoots — the cheap LLM screen step (ai/screen.py) does the actual
+# relevance ranking, this is just the pre-filter that keeps daily LLM cost
+# bounded by gating out papers that have zero MCSP × AI4Sci signal.
 #
-# Curated in 5 tiers — comments are documentation, not enforced groups.
+# Tiers below are documentation only — they're not enforced.
 
 keywords:
-  # ============= Tier 1: core MCSP (very high precision) =====================
+  # ============= Tier 1: direct MCSP / CSP =================================
   - crystal structure prediction
   - molecular crystal
   - molecular crystals
-  # 'polymorph' alone matches genetic-polymorphism papers (e.g. SNP studies)
-  # so we disambiguate with crystallography-context substrings.
   - crystal polymorph
+  - polymorph prediction
   - polymorph selection
   - polymorph stability
-  - polymorph prediction
   - polymorphic transition
-  - polymorphic phase
-  - polymorphic crystal
   - conformational polymorph
-  # bare 'co-crystal' has matched protein/peptide co-crystal complexes
-  # that are not MCSP. Prefer disambiguated variants:
+  - co-crystal screening
+  - cocrystal screening
   - molecular co-crystal
   - molecular cocrystal
   - pharmaceutical co-crystal
   - pharmaceutical cocrystal
-  - co-crystal formation
-  - cocrystal formation
-  - co-crystal screening
-  - cocrystal screening
   - lattice energy
-  - structure search
-  - generative structure
+  - lattice energy ranking
   - molecular packing
   - crystal packing
   - crystal engineering
   - crystal growth
   - crystal nucleation
-  - molecular solid
-  # 'solid form' alone matches 'solid lipid' and similar. Narrow to MCSP
-  # context.
-  - solid form selection
-  - solid form screening
-  - polymorphic solid form
-  - crystalline solid form
-  - solid-state form selection
-  - amorphous solid dispersion
-  - amorphous solid form
-  - powder diffraction
-  - single crystal
-  - single-crystal
-  - space group
   - hydrogen bond network
+  - pi-stacking
   - pharmaceutical crystal
   - drug polymorph
-  - API polymorph
-  - pi-stacking
-  - van der waals crystal
+  - amorphous solid dispersion
+  - solid form selection
+  - powder diffraction
+  - single-crystal x-ray
+  - blind test
+  - CCDC
+  - Cambridge Structural Database
+  - Z-prime
+  - finite-temperature crystal
+  - overprediction problem
+  - dispersion-inclusive DFT
+  - dispersion-corrected DFT
 
-  # ============= Tier 2: adjacent crystalline / materials topics =============
+  # ============= Tier 2: CSP / MCSP software & methods =====================
+  - Genarris
+  - GAtor
+  - GRACE
+  - DMACRYS
+  - PIXEL
+  - USPEX
+  - CALYPSO
+  - random structure search
+  - ab initio random structure
+  - AIRSS
+  - molecular dynamics simulation
+  - ab initio molecular dynamics
+  - free energy calculation
+  - quasi-harmonic
+  - phonon calculation
+
+  # ============= Tier 3: foundation MLIPs (AI4Sci → MCSP transfer) =========
+  # These are the methods the user wants to apply to MCSP. Specific model
+  # names are unambiguous signals.
+  - machine learning potential
+  - neural network potential
+  - interatomic potential
+  - universal interatomic potential
+  - universal force field
+  - foundation model
+  - MACE
+  - MACE-OFF
+  - MACE-MP
+  - NequIP
+  - Allegro
+  - SchNet
+  - PaiNN
+  - DimeNet
+  - GemNet
+  - ALIGNN
+  - M3GNet
+  - CHGNet
+  - MatGL
+  - AIMNet2
+  - ANI-2x
+  - ANI-1x
+  - Open Catalyst
+  - OMat24
+  - GNoME
+  - UMA
+  - ORB
+  - Universal Models for Atoms
+  - equivariant neural network
+  - equivariant graph neural network
+  - SE(3)-equivariant
+  - E(3)-equivariant
+  - tensor field network
+
+  # ============= Tier 4: generative & diffusion models for atoms ==========
+  - diffusion model
+  - flow matching
+  - equivariant diffusion
+  - CDVAE
+  - DiffCSP
+  - MatterGen
+  - FlowMM
+  - MoLeR
+  - molecular generation
+  - molecule generation
+  - crystal generation
+  - structure generation
+  - inverse design
+  - de novo molecular design
+  - generative materials
+  - generative chemistry
+  - score-based generative
+
+  # ============= Tier 5: foundation models in chemistry/biology ==========
+  - ChemBERTa
+  - MoLFormer
+  - ChemFM
+  - Uni-Mol
+  - GROVER
+  - smiles transformer
+  - chemical language model
+  - alphafold
+  - alphafold2
+  - alphafold3
+  - ESMFold
+  - ESM-2
+  - RFDiffusion
+  - protein structure prediction
+  - protein folding
+  - protein language model
+
+  # ============= Tier 6: property prediction & informatics ================
+  - molecular property prediction
+  - chemical property prediction
+  - materials property prediction
+  - materials informatics
+  - materials genome
+  - materials discovery
+  - high-throughput screening
+  - virtual screening
+  - active learning materials
+  - active learning chemistry
+  - bayesian optimization materials
+  - bayesian optimization chemistry
+  - graph neural network for materials
+  - graph neural network for molecules
+  - graph neural network for crystal
+  - CGCNN
+  - MEGNet
+  - molecular fingerprint
+  - graph transformer
+
+  # ============= Tier 7: adjacent crystalline / materials topics ==========
   - metal-organic framework
   - metal organic framework
   - covalent organic framework
   - perovskite
   - zeolite
-  - protein crystal
-  - biomolecular crystal
-  - inorganic crystal
-  - layered material
   - 2D material
-  - 2D crystal
+  - inorganic crystal
   - phase diagram
   - phase transition
 
-  # ============= Tier 3: ML methods *applied to* materials/chemistry =========
-  - machine learning potential
-  - neural network potential
-  - interatomic potential
-  - universal force field
-  - universal interatomic potential
-  - equivariant neural network
-  - E(3)-equivariant
-  - SE(3)-equivariant
-  - message passing neural network
-  - crystal graph
-  - graph neural network for materials
-  - graph neural network for molecules
-  - graph neural network for crystal
-  - inverse design
-  - materials discovery
-  - molecular generation
-  - molecule generation
-  - crystal generation
-  - structure generation
-  - generative chemistry
-  - generative materials
-  - de novo design
-
-  # ============= Tier 4: specific framework / model names ===================
-  # These are unambiguous — if a paper mentions them, it's in our field.
-  - MACE
-  - NequIP
-  - Allegro
-  - M3GNet
-  - CHGNet
-  - MatGL
-  - SchNet
-  - PaiNN
-  - DimeNet
-  - ALIGNN
-  - GNoME
-  - TorchMD
-  - Open Catalyst
-  - alphafold
-
-  # ============= Tier 5: computational chemistry methods ====================
+  # ============= Tier 8: chemistry methods ================================
   - density functional theory
   - DFT calculation
   - ab initio
   - first-principles
-  - molecular dynamics simulation
-  - ab initio molecular dynamics
-  - enhanced sampling
-  - metadynamics
-  - replica exchange
+  - many-body dispersion
+  - Tkatchenko-Scheffler
+  - D3 dispersion
+  - D4 dispersion
   - electronic structure calculation
   - thermodynamic stability
   - kinetic stability
-  - free energy calculation
-
-  # ============= Tier 6: broader AI4Science net (added 2026-05) ============
-  # Goal: catch papers that are clearly ML-for-science but don't drop a tier-1
-  # term in the abstract. Each term should still imply science/chemistry/
-  # materials context, not generic ML.
-  - molecular property prediction
-  - molecular property
-  - chemical property prediction
-  - materials property prediction
-  - materials informatics
-  - materials genome
-  - high-throughput screening
-  - virtual screening
-  - drug discovery
-  - molecular design
-  - chemical space
-  - reaction prediction
-  - retrosynthesis
-  - protein structure
-  - protein folding
-  - protein design
-  - protein-ligand
-  - molecular docking
-  - molecular embedding
-  - chemical embedding
-  - smiles
-  - fingerprint
-  - 3D molecular
-  - 3d structure prediction
-  - diffusion model for molecules
-  - diffusion model for crystals
-  - flow matching molecule
-  - flow matching crystal
-  - transformer for chemistry
-  - transformer for materials
-  - foundation model for chemistry
-  - foundation model for materials
-  - foundation model for molecules
-  - pretrained molecular
-  - self-supervised molecular
-  - active learning materials
-  - active learning chemistry
-  - bayesian optimization materials
-  - reinforcement learning chemistry
-  - autoregressive molecule
-  - graph transformer
-  - GNN molecule
-  - GNN material
-  - GNN crystal
-  - SE(3) transformer
-  - point cloud molecule
-  - 3d point cloud crystal
-  - simulation surrogate
-  - neural surrogate
-  - learned simulator
-  - molecular simulation
-  - quantum chemistry
-  - quantum machine learning
-  - kohn-sham
-  - exchange-correlation
   - solvation free energy
   - binding affinity
-  - retrieval augmented chemistry
-  - benchmark chemistry
-  - benchmark materials
-  - dataset materials
-  - dataset chemistry
+  - retrosynthesis
+  - reaction prediction
+  - molecular docking
+
+  # ============= Tier 9: applications in CSP context ======================
+  - energetic materials
+  - HMX
+  - CL-20
+  - DNI
+  - organic semiconductor
+  - organic photovoltaic
+  - drug discovery
+
+  # ============= Tier 10: known author-name signals =======================
+  # Last-name substring matches (the personalization filter looks at full
+  # title+abstract+authors blob, so a paper by Marom et al. always passes
+  # the pre-filter even if no other keyword matches). Each is a strong
+  # signal that the screen LLM should rate the paper highly.
+  - Marom
+  - Graeme Day
+  - Sarah Price
+  - Marcus Neumann
+  - Detlef Hofmann
+  - Tkatchenko
+  - Beran
+  - Reilly
+  - Gabor Csányi
+  - Csanyi
+  - Tess Smidt
+  - Connor Coley
+  - Welling
+  - Barzilay
+  - Leskovec
+  - Batzner
+  - Musaelian
+  - Schütt
+  - Klicpera
+  - Gasteiger
+  - Jumper
+  - Abramson
+
+  # ============= Tier 11: AI4Sci venues =================================
+  # Workshop / conference signals. Comments on arXiv often mention these.
+  - NeurIPS AI4Science
+  - AI for Science workshop
+  - ML4Materials
+  - Machine Learning for Molecules
+  - Neural Information Processing Systems

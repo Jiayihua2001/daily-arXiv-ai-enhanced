@@ -939,7 +939,10 @@ function parseJsonlData(jsonlText, date) {
         relevance: typeof screen.relevance === 'number' ? screen.relevance : null,
         significance: typeof screen.significance === 'number' ? screen.significance : null,
         screen_tldr: screen.tldr || '',
-        screen_ok: screen.ok !== false
+        screen_ok: screen.ok !== false,
+        // One-sentence rationale for transfer-relevance papers (non-MCSP work
+        // whose method should port to crystal structure prediction).
+        transfer_note: screen.transfer_note || ''
       });
     } catch (error) {
       console.error('解析JSON行失败:', error, line);
@@ -1443,6 +1446,7 @@ function renderPapers() {
       </div>
       <div class="paper-card-body">
         <p class="paper-card-summary">${highlightedSummary}</p>
+        ${paper.transfer_note ? `<p class="paper-card-transfer" title="Why this is relevant despite not being directly MCSP">↪ ${paper.transfer_note}</p>` : ''}
         <div class="paper-card-footer">
           <div class="footer-left">
             <span class="paper-card-date">${formatDate(paper.date)}</span>

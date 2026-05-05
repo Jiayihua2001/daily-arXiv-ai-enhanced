@@ -531,6 +531,20 @@ main { padding-bottom: 80px; }
   overflow: hidden;
 }
 
+/* "Why relevant" line — only appears on transfer-candidate papers
+   (papers that aren't directly MCSP but whose method should port). */
+.paper-card-transfer {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--coral);
+  font-style: italic;
+  padding: 8px 10px;
+  background: var(--coral-soft);
+  border-left: 2px solid var(--coral);
+  border-radius: 4px;
+  margin-top: -2px;
+}
+
 .paper-card-footer {
   display: flex;
   align-items: center;

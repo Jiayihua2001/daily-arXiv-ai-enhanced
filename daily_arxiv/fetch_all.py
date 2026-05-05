@@ -616,21 +616,42 @@ def dedupe(items: Iterable[dict]) -> list[dict]:
 
 
 # Normalize the wildly-different category vocabularies (arXiv codes,
-# OpenAlex concepts, ChemRxiv categories) into a small set of buckets the
-# frontend can group by sensibly. The original raw list is preserved as
-# `raw_categories` for display.
+# OpenAlex concepts, ChemRxiv categories) into the same 6 buckets used by
+# screen.py's LLM. Raw input categories are preserved as `raw_categories`.
+# Order matters: more specific buckets first so we match the strongest
+# signal. screen.py's LLM can override this — these are just defaults
+# used before screen runs (and as the bucket-of-record if screen doesn't
+# emit one).
 _BUCKETS = [
-    ("Materials",  ("cond-mat", "mtrl", "perovskite", "crystal", "polymorph",
-                    "lattice", "material", "framework", "zeolite", "powder",
-                    "solid", "amorphous")),
-    ("Chemistry",  ("chem", "molecul", "supramolec", "co-crystal", "cocrystal",
-                    "drug", "pharma", "synth", "catal")),
-    ("ML methods", ("machine learning", "neural network", "graph neural",
-                    "equivariant", "transformer", "diffusion", "generative",
-                    "potential", "force field", "mace", "nequip", "chgnet",
-                    "schnet", "alphafold", "cs.lg", "cs.ai", "stat.ml")),
-    ("Bio",        ("bio", "protein", "rna", "dna", "cell", "q-bio", "genom")),
-    ("Physics",    ("physics", "quantum", "phonon", "thermal", "phase")),
+    ("CSP & polymorphs",                  ("crystal structure prediction",
+                                           "polymorph", "lattice energy",
+                                           "co-crystal", "cocrystal",
+                                           "molecular crystal", "molecular packing",
+                                           "blind test", "csp", "space group")),
+    ("MLIPs & equivariant NNs",           ("machine learning potential",
+                                           "neural network potential",
+                                           "interatomic potential", "force field",
+                                           "equivariant", "se(3)", "e(3)",
+                                           "mace", "nequip", "allegro", "chgnet",
+                                           "m3gnet", "schnet", "painn", "dimenet",
+                                           "alignn", "aimnet", "uma ", "orb ",
+                                           "ani-2x", "gnome", "matgl")),
+    ("Generative for molecules/crystals", ("generative", "diffusion model",
+                                           "flow matching", "flow-matching",
+                                           "cdvae", "diffcsp", "mattergen",
+                                           "flowmm", "moler", "molecular generation",
+                                           "crystal generation", "structure generation",
+                                           "inverse design", "de novo design")),
+    ("Property prediction & informatics", ("property prediction",
+                                           "materials informatics",
+                                           "materials genome", "high-throughput",
+                                           "screening", "cgcnn", "megnet",
+                                           "graph neural network",
+                                           "active learning", "bayesian optim")),
+    ("Foundation models (chemistry/bio)", ("foundation model", "pretrained",
+                                           "self-supervised", "chembert",
+                                           "molformer", "chemfm", "alphafold",
+                                           "esm-", "rfdiffusion", "uni-mol")),
 ]
 
 def _bucket_for(cats: list[str]) -> str:

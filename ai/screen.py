@@ -62,30 +62,69 @@ SCREEN_RELEVANCE_AUTOKEEP = int(os.environ.get("SCREEN_RELEVANCE_AUTOKEEP", "8")
 SCREEN_MAX_DROP_RATIO   = float(os.environ.get("SCREEN_MAX_DROP_RATIO", "0.90"))
 SCREEN_MAX_WORKERS      = int(os.environ.get("SCREEN_MAX_WORKERS", "12"))
 
-VALID_BUCKETS = {"Materials", "ML methods", "Chemistry", "Bio", "Physics", "Other"}
-
-SYSTEM_PROMPT = """You evaluate AI-for-science papers for a researcher whose focus is Molecular Crystal Structure Prediction (MCSP) and AI for Science (AI4Sci) — broadly: ML potentials, generative models for molecules/materials, GNNs for chemistry, materials informatics, computational chemistry, foundation models for science.
-
-For each paper, return strict JSON (no prose) with these keys:
-{
-  "relevance": int 1-10,        // 10 = core MCSP/AI4Sci, 1 = unrelated CS/bio/etc
-  "significance": int 1-10,     // 10 = breakthrough/new method, 1 = incremental
-  "bucket": one of ["Materials", "ML methods", "Chemistry", "Bio", "Physics", "Other"],
-  "tldr": string 15-25 words    // crisp one-line description
+VALID_BUCKETS = {
+    "CSP & polymorphs",
+    "MLIPs & equivariant NNs",
+    "Generative for molecules/crystals",
+    "Property prediction & informatics",
+    "Foundation models (chemistry/bio)",
+    "Other",
 }
 
-Scoring guidance:
-- relevance 9-10: directly about crystal structure prediction, polymorphs, ML potentials (MACE/NequIP/CHGNet), generative models for molecules/crystals, materials discovery via ML.
-- relevance 6-8: adjacent ML-for-chemistry, ML-for-biology with structure focus, foundation models that touch science domains.
-- relevance 3-5: generic deep learning that *could* apply to science but the paper is about general ML.
-- relevance 1-2: unrelated (vision, NLP, robotics, theory).
-- significance 9-10: new SOTA on a major benchmark, novel architecture, big dataset release, paradigm shift.
-- significance 6-8: solid empirical contribution, useful method, good benchmark.
-- significance 3-5: incremental improvement, narrow application, limited novelty.
-- significance 1-2: workshop-level, derivative, or just a re-application of existing methods.
+# Field experts whose work is ALWAYS worth reading. Two groups:
+#   MCSP_AUTHORS  - direct CSP / polymorph community → strong direct-relevance signal
+#   AI4SCI_AUTHORS - SOTA AI for science whose methods transfer to MCSP
+# Last names only (case-insensitive substring match against the authors list).
+MCSP_AUTHORS = {
+    "marom", "day", "price", "neumann", "hofmann", "tkatchenko", "beran",
+    "reilly", "rumson", "hoja", "salimi",
+}
+AI4SCI_AUTHORS = {
+    "csányi", "csanyi", "smidt", "coley", "duvenaud", "welling",
+    "barzilay", "leskovec", "jaakkola", "vondrak",
+    "batzner", "musaelian", "kovács", "kovacs",  # MACE / NequIP / Allegro folks
+    "schütt", "schutt", "klicpera", "gasteiger",  # SchNet / GemNet folks
+    "deepmind", "jumper", "abramson",             # AlphaFold-family
+}
+
+SYSTEM_PROMPT = """You score arXiv papers for a researcher in Noa Marom's group at Carnegie Mellon. Their core area is FIRST-PRINCIPLES MOLECULAR CRYSTAL STRUCTURE PREDICTION (MCSP) — generating polymorph candidate pools (Genarris), genetic-algorithm search (GAtor), dispersion-DFT ranking (FHI-aims), and increasingly using foundation MLIPs (MACE-OFF, AIMNet2, UMA) to accelerate or replace expensive DFT. They also actively scout SOTA AI-for-science work whose METHODS could TRANSFER to MCSP.
+
+A paper can score high for either reason:
+  (A) DIRECT MCSP — about CSP, polymorphs, lattice energy ranking, MLIPs evaluated on organic crystals, blind tests, finite-T corrections, multi-component crystals, flexible molecules, organic semiconductors / pharmaceuticals / energetic materials in CSP context.
+  (B) TRANSFER POTENTIAL — methods that are not currently used in MCSP but plausibly should be: foundation MLIPs (MACE family, AIMNet2, UMA, OMat24, GNoME, ANI, ORB, CHGNet, M3GNet, ALIGNN), equivariant / SE(3)-equivariant GNNs, generative diffusion/flow-matching for atoms (CDVAE, DiffCSP, MatterGen, FlowMM, equivariant diffusion), AlphaFold-family structure prediction, foundation models for chemistry (ChemBERTa, MoLFormer, ChemFM), active learning / Bayesian opt for materials, self-supervised pretraining for atomistic systems.
+
+For each paper return ONLY this JSON (no prose):
+{
+  "relevance": int 1-10,
+  "significance": int 1-10,
+  "bucket": one of ["CSP & polymorphs", "MLIPs & equivariant NNs", "Generative for molecules/crystals", "Property prediction & informatics", "Foundation models (chemistry/bio)", "Other"],
+  "tldr": string 15-30 words,
+  "transfer_note": string 10-25 words OR empty   // only if not directly MCSP but transferable; explain WHAT would transfer
+}
+
+Relevance ladder (use the HIGHER of direct vs transfer):
+  10 = direct CSP work (Marom/Day/Price/Neumann/Hofmann/Tkatchenko/Beran groups, blind tests, polymorph ranking, MLIP-on-organic-crystals)
+   8-9 = strong transfer candidate (new foundation MLIP, novel equivariant GNN, generative model for atoms with symmetry, AlphaFold-style structure work) — also award for adjacent crystalline materials work (perovskites, MOFs, COFs)
+   6-7 = useful AI4Sci method (property prediction, active learning for chemistry, foundation chem models) without obvious immediate transfer
+   3-5 = generic ML touching science but paper itself is about general ML / vision / NLP / RL
+   1-2 = unrelated (pure vision, NLP, theory, RL on games, robotics, etc.)
+
+Significance ladder:
+  10 = paradigm shift, SOTA on a major benchmark, new dataset/model that the field will use
+  7-9 = solid empirical contribution, useful method or benchmark
+  4-6 = incremental improvement, narrow application
+  1-3 = workshop-level, derivative, or just a re-application of existing methods
+
+Author signal: if any author's last name matches a known MCSP figure (Marom, Day, Price, Neumann, Hofmann, Tkatchenko, Beran, Reilly, Hoja) bump relevance to 10 and significance ≥ 7. If matches an AI4Sci leader (Csányi, Smidt, Coley, Welling, Barzilay, Leskovec, Batzner, Musaelian, Schütt, Klicpera/Gasteiger, Jumper, Abramson) bump relevance to ≥ 8 and significance ≥ 7.
+
+Bucket choice: prefer the most specific that fits. "Other" only when truly unrelated.
+
+`transfer_note` is empty for direct MCSP work and for unrelated papers. Fill it ONLY when relevance >= 7 AND the paper isn't directly MCSP — one sentence on what would transfer to crystal structure prediction.
 """
 
 USER_TEMPLATE = """Title: {title}
+
+Authors: {authors}
 
 Abstract: {summary}
 
@@ -165,8 +204,20 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
     # Cap abstract length to keep prompt small (and cheap).
     if len(summary) > 1500:
         summary = summary[:1500] + "…"
+    # Authors: pass first-authors + last (corresponding) author. Cap at 8
+    # names to keep prompt size predictable on giant author lists (CSP
+    # blind tests can have 100+ co-authors).
+    raw_authors = item.get("authors") or []
+    if isinstance(raw_authors, str):
+        raw_authors = [a.strip() for a in raw_authors.split(",") if a.strip()]
+    if len(raw_authors) > 8:
+        authors_str = ", ".join(raw_authors[:5]) + f", … {raw_authors[-1]}"
+    else:
+        authors_str = ", ".join(raw_authors)
 
-    user_prompt = USER_TEMPLATE.format(title=title, summary=summary)
+    user_prompt = USER_TEMPLATE.format(
+        title=title, authors=authors_str or "(unknown)", summary=summary,
+    )
 
     last_text = ""
     for attempt, kwargs_extra in enumerate([
@@ -181,7 +232,7 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
                     {"role": "user",   "content": user_prompt},
                 ],
                 temperature=0.0,
-                max_tokens=200,   # tiny output, capped
+                max_tokens=320,   # ~enough for the JSON + transfer_note line
                 **kwargs_extra,
             )
             text = resp.choices[0].message.content or ""
@@ -189,11 +240,12 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
             data = _extract_json_obj(text)
             if data:
                 return {
-                    "relevance":    _coerce_score(data.get("relevance"), default=5),
-                    "significance": _coerce_score(data.get("significance"), default=5),
-                    "bucket":       _coerce_bucket(data.get("bucket")),
-                    "tldr":         str(data.get("tldr") or "")[:300],
-                    "ok":           True,
+                    "relevance":     _coerce_score(data.get("relevance"), default=5),
+                    "significance":  _coerce_score(data.get("significance"), default=5),
+                    "bucket":        _coerce_bucket(data.get("bucket")),
+                    "tldr":          str(data.get("tldr") or "")[:300],
+                    "transfer_note": str(data.get("transfer_note") or "")[:240],
+                    "ok":            True,
                 }
         except Exception as e:
             if not getattr(screen_one, "_logged_first_err", False):
