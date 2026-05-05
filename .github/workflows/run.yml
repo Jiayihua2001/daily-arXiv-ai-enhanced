@@ -161,8 +161,13 @@ jobs:
 
         cd ai
         export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-        export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}"
-        export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
+        export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}"
+        # Default model = gpt-5.4-mini (per user direction). NOTE: this
+        # default is ONLY used when the repo Variable MODEL_NAME is empty/
+        # unset. If the Variable is set (e.g. to 'deepseek-reasoner'), it
+        # WINS over this default. To use the default, DELETE MODEL_NAME in
+        # repo Settings → Secrets and variables → Actions → Variables.
+        export MODEL_NAME="${{ vars.MODEL_NAME || 'gpt-5.4-mini' }}"
         # Echo the resolved config — top of the screen step's logs is the
         # first place a wrong MODEL_NAME / BASE_URL becomes obvious.
         echo "🔧 screen step config:"
@@ -204,9 +209,11 @@ jobs:
 
         cd ai
         export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-        export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}"
+        export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}"
         export LANGUAGE="${{ vars.LANGUAGE || 'English' }}"
-        export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
+        # Same model default as the screen step. See note above re: how to
+        # actually use it (delete the repo MODEL_NAME variable).
+        export MODEL_NAME="${{ vars.MODEL_NAME || 'gpt-5.4-mini' }}"
 
         python enhance.py --data ../data/${today}.jsonl
 
