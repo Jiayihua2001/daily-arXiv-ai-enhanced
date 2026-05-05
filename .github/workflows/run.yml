@@ -163,6 +163,12 @@ jobs:
         export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
         export OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}"
         export MODEL_NAME="${{ vars.MODEL_NAME || 'deepseek-chat' }}"
+        # Echo the resolved config — top of the screen step's logs is the
+        # first place a wrong MODEL_NAME / BASE_URL becomes obvious.
+        echo "🔧 screen step config:"
+        echo "    MODEL_NAME      = $MODEL_NAME"
+        echo "    OPENAI_BASE_URL = $OPENAI_BASE_URL"
+        echo "    OPENAI_API_KEY  = $([ -n \"$OPENAI_API_KEY\" ] && echo '(set, length '${#OPENAI_API_KEY}')' || echo '(unset)')"
         # Tunable thresholds (defaults: rel>=5 sig>=4, autokeep at rel>=8)
         export SCREEN_MIN_RELEVANCE="${{ vars.SCREEN_MIN_RELEVANCE || '5' }}"
         export SCREEN_MIN_SIGNIFICANCE="${{ vars.SCREEN_MIN_SIGNIFICANCE || '4' }}"

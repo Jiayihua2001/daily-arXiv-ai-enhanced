@@ -335,6 +335,44 @@ def main() -> int:
     client = OpenAI(**client_kwargs)
     print(f"[screen] model={model} via {base_url or '(default openai)'}", file=sys.stderr)
 
+    # Preflight: one tiny LLM call to verify the model + key + base_url
+    # combination actually works BEFORE we parallelize 200+ doomed calls.
+    # Last-known failure: MODEL_NAME=deepseek-reasoner returned 404 on every
+    # one of 278 papers (~20s wasted). This catches it in under 2s.
+    try:
+        _ = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+            temperature=0.0,
+        )
+        print(f"[screen] preflight OK", file=sys.stderr)
+    except Exception as e:
+        err = type(e).__name__
+        msg = str(e)
+        # Surface the most actionable diagnostic possible.
+        print(f"\n{'='*70}\n[screen] PREFLIGHT FAILED — model is unreachable.\n{'='*70}",
+              file=sys.stderr)
+        print(f"  error type    : {err}", file=sys.stderr)
+        print(f"  error message : {msg[:500]}", file=sys.stderr)
+        print(f"  MODEL_NAME    : {model!r}", file=sys.stderr)
+        print(f"  OPENAI_BASE_URL: {base_url or '(default openai)'}", file=sys.stderr)
+        print(f"  OPENAI_API_KEY : {'set (length ' + str(len(api_key)) + ')' if api_key else '(unset)'}",
+              file=sys.stderr)
+        print(f"\n  Common fixes:", file=sys.stderr)
+        print(f"    - Wrong MODEL_NAME for this provider. DeepSeek wants "
+              f"`deepseek-chat` (not `deepseek-reasoner` unless you have R1 "
+              f"access). OpenAI wants `gpt-4o-mini` etc.", file=sys.stderr)
+        print(f"    - OPENAI_BASE_URL pointing at the wrong provider.",
+              file=sys.stderr)
+        print(f"    - API key for one provider with model name from another.",
+              file=sys.stderr)
+        print(f"    - Update repo Variables/Secrets at:", file=sys.stderr)
+        print(f"      Settings → Secrets and variables → Actions",
+              file=sys.stderr)
+        print(f"{'='*70}\n", file=sys.stderr)
+        return 2
+
     # Parallel screen
     results: list[tuple[dict, dict]] = [None] * len(items)  # (item, screen)
     with ThreadPoolExecutor(max_workers=args.max_workers) as pool:
