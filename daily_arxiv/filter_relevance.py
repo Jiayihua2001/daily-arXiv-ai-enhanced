@@ -43,14 +43,18 @@ def matches_any(text: str, keywords: list[str]) -> bool:
 
 
 # Filter philosophy:
-#   * arXiv items came in via category-gated query (cond-mat.mtrl-sci, cs.LG…)
-#     — they are ALREADY plausibly relevant. Never drop them.
-#   * OpenAlex / ChemRxiv items are search-gated, but the search uses broad
-#     OR'd terms, so kw-overlap is the main relevance signal.
-#   * If the resulting set is still small, top up with the highest-scoring
-#     non-matches so the daily feed feels alive.
-SOFTFLOOR_MIN = 60   # was 20 — user wants comprehensive coverage
-ARXIV_KEEP_ALL = True  # drop the substring gate for arXiv items entirely
+#   * arXiv items are category-gated upstream (cond-mat.mtrl-sci, cs.LG…)
+#     — keep them all; the screen step gives them a real LLM score.
+#   * OpenAlex / Semantic Scholar items are search-gated upstream too, but
+#     drop those whose title+abstract miss every keyword. The screen step
+#     downstream is expensive and only helps if the input is plausibly relevant.
+#   * SOFTFLOOR removed: previously padded sparse days with heuristically-
+#     scored non-matches. In practice this added image-diffusion / SLAM /
+#     remote-sensing papers from s2 that flooded the screen step with junk
+#     it then failed to score reliably. A short feed of MCSP papers beats a
+#     long feed of unrelated stuff. Set SOFTFLOOR_MIN env var to override.
+SOFTFLOOR_MIN = int(os.environ.get("SOFTFLOOR_MIN", "0"))
+ARXIV_KEEP_ALL = True  # arxiv is already category-gated upstream
 
 # Source/category preference ordering (higher = more likely to be in-scope).
 def _heuristic_score(item: dict) -> float:

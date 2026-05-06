@@ -318,13 +318,15 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
             print(f"[screen] {item.get('id','?')} attempt {attempt+1}: "
                   f"{type(e).__name__}: {e}", file=sys.stderr)
 
-    # All LLM attempts failed. Per user direction: NO heuristic fallback —
-    # only real LLM scores are useful. Return a sentinel so this paper is
-    # tagged as unscored; the workflow's failure-rate guard catches systemic
-    # outages, and per-paper failures keep the paper visible (no badge,
-    # sorts to bottom) but we never fabricate scores.
-    print(f"[screen] {item.get('id','?')}: LLM failed; no score "
-          f"(last_text={last_text[:80]!r})", file=sys.stderr)
+    # All LLM attempts failed. NO heuristic fallback — only real LLM
+    # scores count. With should_keep returning False for unscored papers,
+    # this means the paper drops; that's intentional (better to lose a
+    # real one than flood the feed with garbage). Log the title +
+    # response so we can diagnose systematic LLM failures by source/topic.
+    print(f"[screen] DROP-UNSCORED  id={item.get('id','?')}  "
+          f"src={item.get('source','?')}  "
+          f"title={(item.get('title') or '')[:80]!r}  "
+          f"last_text={last_text[:120]!r}", file=sys.stderr)
     return {
         "relevance":    None,
         "significance": None,
@@ -335,12 +337,18 @@ def screen_one(client: OpenAI, model: str, item: dict) -> dict:
 
 
 def should_keep(screen: dict) -> bool:
-    # Unscored papers (LLM call failed): keep them visible — we can't judge,
-    # so we don't drop. Frontend won't show a badge and they sort to bottom.
+    # Unscored papers (LLM call failed): DROP. Earlier we kept them visible
+    # ("don't punish for an API hiccup"), but the strict-prompt era + DeepSeek
+    # JSON-mode flakiness means 25%+ of papers fail per run, and *those* are
+    # the same papers the strict prompt was about to score r=1 anyway. Net
+    # effect of keeping unscored was a feed flooded with image-diffusion /
+    # remote-sensing / SLAM papers. Hard fix: no score = no entry.
+    # Systemic LLM outages are still caught by the >50% failure-rate guard
+    # in main(); this is for the 5–30% per-paper failures.
     rel = screen.get("relevance")
     sig = screen.get("significance")
     if rel is None or sig is None:
-        return True
+        return False
     if rel >= SCREEN_RELEVANCE_AUTOKEEP:
         return True
     return rel >= SCREEN_MIN_RELEVANCE and sig >= SCREEN_MIN_SIGNIFICANCE
