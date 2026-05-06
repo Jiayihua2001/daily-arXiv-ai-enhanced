@@ -52,13 +52,19 @@ if os.path.exists(".env"):
 
 
 # ---------- thresholds (env-overridable) ----------
-SCREEN_MIN_RELEVANCE    = int(os.environ.get("SCREEN_MIN_RELEVANCE", "5"))
+SCREEN_MIN_RELEVANCE    = int(os.environ.get("SCREEN_MIN_RELEVANCE", "6"))
 SCREEN_MIN_SIGNIFICANCE = int(os.environ.get("SCREEN_MIN_SIGNIFICANCE", "4"))
 # Always keep a paper that scores >= this on relevance even if significance is low
 # (a foundational paper in our area is worth showing even if "incremental").
 SCREEN_RELEVANCE_AUTOKEEP = int(os.environ.get("SCREEN_RELEVANCE_AUTOKEEP", "8"))
+# Hard relevance floor for the safety-floor pullback: papers below this get
+# DROPPED even if dropping would push us past SCREEN_MAX_DROP_RATIO. This
+# stops obvious off-topic papers (medical AI, geophysics, etc., scoring r=2)
+# from being readmitted just because the LLM was strict that day.
+SCREEN_HARD_REL_FLOOR   = int(os.environ.get("SCREEN_HARD_REL_FLOOR", "4"))
 # Floor: never drop more than 90% of input — if the LLM is being too strict
-# we'd rather show borderline papers than nothing.
+# we'd rather show borderline papers than nothing. Pullback respects
+# SCREEN_HARD_REL_FLOOR.
 SCREEN_MAX_DROP_RATIO   = float(os.environ.get("SCREEN_MAX_DROP_RATIO", "0.90"))
 SCREEN_MAX_WORKERS      = int(os.environ.get("SCREEN_MAX_WORKERS", "12"))
 
@@ -89,9 +95,56 @@ AI4SCI_AUTHORS = {
 
 SYSTEM_PROMPT = """You score arXiv papers for a researcher in Noa Marom's group at Carnegie Mellon. Their core area is FIRST-PRINCIPLES MOLECULAR CRYSTAL STRUCTURE PREDICTION (MCSP) — generating polymorph candidate pools (Genarris), genetic-algorithm search (GAtor), dispersion-DFT ranking (FHI-aims), and increasingly using foundation MLIPs (MACE-OFF, AIMNet2, UMA) to accelerate or replace expensive DFT. They also actively scout SOTA AI-for-science work whose METHODS could TRANSFER to MCSP.
 
-A paper can score high for either reason:
-  (A) DIRECT MCSP — about CSP, polymorphs, lattice energy ranking, MLIPs evaluated on organic crystals, blind tests, finite-T corrections, multi-component crystals, flexible molecules, organic semiconductors / pharmaceuticals / energetic materials in CSP context.
-  (B) TRANSFER POTENTIAL — methods that are not currently used in MCSP but plausibly should be: foundation MLIPs (MACE family, AIMNet2, UMA, OMat24, GNoME, ANI, ORB, CHGNet, M3GNet, ALIGNN), equivariant / SE(3)-equivariant GNNs, generative diffusion/flow-matching for atoms (CDVAE, DiffCSP, MatterGen, FlowMM, equivariant diffusion), AlphaFold-family structure prediction, foundation models for chemistry (ChemBERTa, MoLFormer, ChemFM), active learning / Bayesian opt for materials, self-supervised pretraining for atomistic systems.
+================================================================
+HARD OUT-OF-SCOPE — score relevance ≤ 2 (do NOT inflate via "transfer"):
+================================================================
+  • Earth interior / planetary geophysics / mantle / deep-earth mineralogy.
+    A paper about magnesium silicates AT 660 km DEPTH is geophysics, NOT MCSP,
+    even if it talks about "crystalline materials under pressure".
+  • Medical / clinical / healthcare AI: medical claims, biosignals, sleep,
+    radiology, ophthalmology, EHR/EMR, diagnostic imaging, drug discovery
+    for therapeutic targets. (Drug-form CSP — polymorph selection for an
+    API — IS in scope; therapeutic mechanism work is OUT.)
+  • Software-engineering AI: code refactoring, bug detection, code generation.
+  • General CV / NLP / RL / robotics on non-chemistry data.
+  • Pure math / theory papers with no atomistic application.
+  • Causality / fairness / trustworthy-AI papers without chemistry context.
+  • "Foundation model on X" where X is anything other than molecules,
+    crystals, materials, or chemistry data. Mere use of transformers is
+    NOT a transfer signal.
+  • Benchmarks for non-chemistry data (Raman / IR / mass-spec on biology
+    or environmental samples is borderline — use judgment).
+
+If a paper falls into any of these buckets, set relevance ≤ 2, bucket="Other",
+transfer_note="" — even if the title contains words like "crystal",
+"materials", or "structure". The buckets above OVERRIDE keyword matching.
+
+================================================================
+IN-SCOPE — score relevance high:
+================================================================
+  (A) DIRECT MCSP (relevance 9-10) — about CSP, polymorphs, lattice energy
+      ranking, MLIPs evaluated on organic crystals, blind tests, finite-T
+      corrections, multi-component crystals, flexible molecules, organic
+      semiconductors / pharmaceuticals / energetic materials in CSP context.
+
+  (B) TRANSFER POTENTIAL (relevance 6-9) — methods NOT currently used in
+      MCSP but plausibly should be:
+        - foundation MLIPs (MACE family, AIMNet2, UMA, OMat24, GNoME, ANI,
+          ORB, CHGNet, M3GNet, ALIGNN)
+        - equivariant / SE(3)-equivariant GNNs for atomistic systems
+        - generative diffusion/flow-matching for atoms (CDVAE, DiffCSP,
+          MatterGen, FlowMM)
+        - AlphaFold-family structure prediction for biomolecular crystals
+        - foundation models trained on chemistry/atomistic data
+          (ChemBERTa, MoLFormer, ChemFM, MoleculeNet)
+        - active learning / Bayesian opt FOR MATERIALS / CHEMISTRY
+        - self-supervised pretraining ON ATOMISTIC SYSTEMS
+      The method has to be APPLIED TO molecules/crystals/materials in the
+      paper itself — not just claim "could be applied to materials".
+
+  (C) ADJACENT CRYSTALLINE MATERIALS (relevance 5-7) — perovskites, MOFs,
+      COFs, zeolites, 2D materials, when studied with first-principles or
+      ML methods that could move sideways into MCSP.
 
 For each paper return ONLY this JSON (no prose):
 {
@@ -99,15 +152,15 @@ For each paper return ONLY this JSON (no prose):
   "significance": int 1-10,
   "bucket": one of ["CSP & polymorphs", "MLIPs & equivariant NNs", "Generative for molecules/crystals", "Property prediction & informatics", "Foundation models (chemistry/bio)", "Other"],
   "tldr": string 15-30 words,
-  "transfer_note": string 10-25 words OR empty   // only if not directly MCSP but transferable; explain WHAT would transfer
+  "transfer_note": string 10-25 words OR empty   // only if rel >= 6 AND not directly MCSP; explain WHAT would transfer
 }
 
-Relevance ladder (use the HIGHER of direct vs transfer):
+Relevance ladder:
   10 = direct CSP work (Marom/Day/Price/Neumann/Hofmann/Tkatchenko/Beran groups, blind tests, polymorph ranking, MLIP-on-organic-crystals)
-   8-9 = strong transfer candidate (new foundation MLIP, novel equivariant GNN, generative model for atoms with symmetry, AlphaFold-style structure work) — also award for adjacent crystalline materials work (perovskites, MOFs, COFs)
-   6-7 = useful AI4Sci method (property prediction, active learning for chemistry, foundation chem models) without obvious immediate transfer
-   3-5 = generic ML touching science but paper itself is about general ML / vision / NLP / RL
-   1-2 = unrelated (pure vision, NLP, theory, RL on games, robotics, etc.)
+   8-9 = strong transfer candidate APPLIED to atomistic systems (new foundation MLIP, novel equivariant GNN for molecules/crystals, generative model for atoms with symmetry, AlphaFold-style structure work)
+   6-7 = adjacent crystalline materials work (perovskites, MOFs, COFs) OR a chemistry-applied AI method without obvious immediate MCSP transfer
+   3-5 = generic ML / theory paper that incidentally touches science but isn't applied to molecules or crystals
+   1-2 = OUT-OF-SCOPE (see hard list above): geophysics, medical AI, software AI, pure CV/NLP/RL, etc.
 
 Significance ladder:
   10 = paradigm shift, SOTA on a major benchmark, new dataset/model that the field will use
@@ -115,11 +168,11 @@ Significance ladder:
   4-6 = incremental improvement, narrow application
   1-3 = workshop-level, derivative, or just a re-application of existing methods
 
-Author signal: if any author's last name matches a known MCSP figure (Marom, Day, Price, Neumann, Hofmann, Tkatchenko, Beran, Reilly, Hoja) bump relevance to 10 and significance ≥ 7. If matches an AI4Sci leader (Csányi, Smidt, Coley, Welling, Barzilay, Leskovec, Batzner, Musaelian, Schütt, Klicpera/Gasteiger, Jumper, Abramson) bump relevance to ≥ 8 and significance ≥ 7.
+Author signal: if any author's last name matches a known MCSP figure (Marom, Day, Price, Neumann, Hofmann, Tkatchenko, Beran, Reilly, Hoja) bump relevance to 10 and significance ≥ 7. If matches an AI4Sci leader (Csányi, Smidt, Coley, Welling, Barzilay, Leskovec, Batzner, Musaelian, Schütt, Klicpera/Gasteiger, Jumper, Abramson) bump relevance to ≥ 8 and significance ≥ 7. Author bumps NEVER apply if the paper itself is OUT-OF-SCOPE per the hard list.
 
 Bucket choice: prefer the most specific that fits. "Other" only when truly unrelated.
 
-`transfer_note` is empty for direct MCSP work and for unrelated papers. Fill it ONLY when relevance >= 7 AND the paper isn't directly MCSP — one sentence on what would transfer to crystal structure prediction.
+`transfer_note` is empty for direct MCSP work and for unrelated papers. Fill it ONLY when relevance >= 6 AND the paper isn't directly MCSP — one sentence on what would transfer to crystal structure prediction.
 """
 
 USER_TEMPLATE = """Title: {title}
@@ -438,31 +491,48 @@ def main() -> int:
         else:
             dropped.append(item)
 
-    # Safety floor: don't drop more than SCREEN_MAX_DROP_RATIO
+    # Safety floor: don't drop more than SCREEN_MAX_DROP_RATIO. BUT obey
+    # the hard relevance floor — papers scored as out-of-scope by the LLM
+    # (rel < SCREEN_HARD_REL_FLOOR) are NEVER pulled back, regardless of
+    # how strict the LLM was that day. Dropping the entire feed because
+    # all the day's good papers were borderline is preferable to filling
+    # the feed with garbage.
     max_drop = int(len(items) * SCREEN_MAX_DROP_RATIO)
     if len(dropped) > max_drop:
         excess = len(dropped) - max_drop
-        # Score-based sort; treat None as 0 so unscored papers don't crash.
-        dropped.sort(
-            key=lambda i: ((i["screen"].get("relevance") or 0)
-                           + (i["screen"].get("significance") or 0)),
+        # Eligible for pullback: anything at or above the hard relevance floor.
+        eligible = [i for i in dropped
+                    if (i["screen"].get("relevance") or 0) >= SCREEN_HARD_REL_FLOOR]
+        # Sort eligible by RELEVANCE first (then significance) — the user
+        # cares "is this for me" before "is this important to the world".
+        eligible.sort(
+            key=lambda i: ((i["screen"].get("relevance")    or 0),
+                           (i["screen"].get("significance") or 0)),
             reverse=True,
         )
-        survivors.extend(dropped[:excess])
-        dropped = dropped[excess:]
-        print(f"[screen] safety floor: pulled {excess} borderline papers back "
-              f"(would have dropped {max_drop + excess}/{len(items)} otherwise)",
+        pull = eligible[:excess]
+        survivors.extend(pull)
+        # Remove pulled-back items from the dropped list (preserve order otherwise).
+        pulled_ids = {id(p) for p in pull}
+        dropped = [d for d in dropped if id(d) not in pulled_ids]
+        rejected_hard_floor = sum(1 for i in dropped
+            if (i["screen"].get("relevance") or 0) < SCREEN_HARD_REL_FLOOR)
+        print(f"[screen] safety floor: pulled {len(pull)}/{excess} borderline "
+              f"papers back (rel>={SCREEN_HARD_REL_FLOOR}); "
+              f"{rejected_hard_floor} below-floor papers stay dropped.",
               file=sys.stderr)
 
-    # Sort survivors by significance then relevance descending. Unscored
-    # papers (None) sort to the bottom so enhance.py prioritizes the
-    # high-confidence picks if a CI run times out.
+    # Sort survivors by RELEVANCE first, significance as tiebreaker — for a
+    # personal feed, "is this for me" matters more than "is this important
+    # to the world". A r=10 s=5 niche-MCSP paper outranks a r=2 s=10 medical
+    # foundation model. Unscored papers (None) sort to the bottom so the
+    # downstream enhance step prioritizes the high-confidence picks if a CI
+    # run times out partway through.
     def _sort_key(i):
         s = i.get("screen") or {}
-        # Unscored → -1 sort key so they go AFTER any real scores.
-        sig = s.get("significance") if s.get("significance") is not None else -1
         rel = s.get("relevance")    if s.get("relevance")    is not None else -1
-        return (sig, rel)
+        sig = s.get("significance") if s.get("significance") is not None else -1
+        return (rel, sig)
     survivors.sort(key=_sort_key, reverse=True)
 
     # Write outputs
