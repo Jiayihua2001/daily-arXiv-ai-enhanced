@@ -40,7 +40,13 @@ jobs:
 
         export TOKEN_GITHUB=${{ secrets.TOKEN_GITHUB }}
         export CATEGORIES="${{ vars.CATEGORIES || 'cond-mat.mtrl-sci,cond-mat.soft,cond-mat.dis-nn,cond-mat.stat-mech,physics.chem-ph,physics.comp-ph,physics.atm-clus,physics.bio-ph,cs.LG,cs.AI,cs.CE,stat.ML,q-bio.BM,q-bio.QM' }}"
-        export LOOKBACK_DAYS="${{ vars.LOOKBACK_DAYS || '3' }}"
+        # 30-day window every day. Sounds expensive but isn't: dedup_history.py
+        # later in the workflow drops every paper ID we've already screened,
+        # so the screen LLM only sees genuinely-new papers (~5–50/day on a
+        # mature seen-IDs DB). The wide window catches papers that earlier
+        # runs missed: arxiv API hiccups, OpenAlex slow-indexing, weekend
+        # gaps, etc. Override via `vars.LOOKBACK_DAYS` if you want narrower.
+        export LOOKBACK_DAYS="${{ vars.LOOKBACK_DAYS || '30' }}"
         export SOURCES="${{ vars.SOURCES || 'arxiv,openalex,s2' }}"
         export OPENALEX_EMAIL="${{ vars.EMAIL || 'zefengc@andrew.cmu.edu' }}"
 
