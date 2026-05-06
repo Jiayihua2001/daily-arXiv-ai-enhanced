@@ -66,7 +66,17 @@ SCREEN_HARD_REL_FLOOR   = int(os.environ.get("SCREEN_HARD_REL_FLOOR", "4"))
 # we'd rather show borderline papers than nothing. Pullback respects
 # SCREEN_HARD_REL_FLOOR.
 SCREEN_MAX_DROP_RATIO   = float(os.environ.get("SCREEN_MAX_DROP_RATIO", "0.90"))
-SCREEN_MAX_WORKERS      = int(os.environ.get("SCREEN_MAX_WORKERS", "12"))
+# 12 → 6: 12 concurrent workers triggered DeepSeek's per-account
+# rate limits during the 3,299-paper 30-day backlog catch-up
+# (86% failure rate). 6 still amortizes wall-clock time well but
+# reduces burst pressure on the provider.
+SCREEN_MAX_WORKERS      = int(os.environ.get("SCREEN_MAX_WORKERS", "6"))
+# Hard cap on papers screened per run. The 30-day lookback can pile
+# up thousands of candidates after a long quiet stretch; processing
+# all of them in one run risks rate-limit cascades AND eats the daily
+# token budget. Cap to the most-recent N — dedup_history persists
+# what got screened, so the rest catch up over subsequent daily runs.
+SCREEN_MAX_PER_RUN      = int(os.environ.get("SCREEN_MAX_PER_RUN", "500"))
 
 VALID_BUCKETS = {
     "CSP & polymorphs",
@@ -377,9 +387,27 @@ def main() -> int:
         print(f"[screen] empty input", file=sys.stderr)
         return 1
 
+    # Cap to the most-recent SCREEN_MAX_PER_RUN papers. Sort by published
+    # date when present (descending), then arxiv-id (descending), so the
+    # cap selects the freshest work. Items without dates fall to the end.
+    if SCREEN_MAX_PER_RUN > 0 and len(items) > SCREEN_MAX_PER_RUN:
+        def _date_key(it):
+            d = (it.get("published") or it.get("ingested") or "")
+            return (d, str(it.get("id", "")))
+        items_sorted = sorted(items, key=_date_key, reverse=True)
+        deferred = items_sorted[SCREEN_MAX_PER_RUN:]
+        items    = items_sorted[:SCREEN_MAX_PER_RUN]
+        print(f"[screen] {len(items) + len(deferred)} candidates; capping to "
+              f"{len(items)} most recent for this run "
+              f"({len(deferred)} deferred — they remain in the input file's "
+              f"earlier stages and will surface tomorrow if still un-screened "
+              f"per dedup_history). Override via SCREEN_MAX_PER_RUN env var.",
+              file=sys.stderr)
+
     print(f"[screen] {len(items)} candidates; "
           f"thresholds rel>={SCREEN_MIN_RELEVANCE} sig>={SCREEN_MIN_SIGNIFICANCE} "
-          f"(autokeep at rel>={SCREEN_RELEVANCE_AUTOKEEP})", file=sys.stderr)
+          f"(autokeep at rel>={SCREEN_RELEVANCE_AUTOKEEP}); "
+          f"workers={SCREEN_MAX_WORKERS}", file=sys.stderr)
 
     # OpenAI client. Bail BEFORE constructing OpenAI() if no key — its
     # constructor raises immediately rather than at first call, and a hard

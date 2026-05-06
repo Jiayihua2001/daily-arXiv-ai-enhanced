@@ -6,11 +6,38 @@ Currently handles:
   - max_tokens vs max_completion_tokens (gpt-5 family + o-series renamed it)
   - unsupported temperature on o-series (must be omitted / default to 1.0)
   - unsupported response_format on some models (silently dropped on 400)
+  - HTTP 429 / RateLimitError / transient connection errors with
+    exponential backoff (DeepSeek throttles aggressively when many
+    workers send concurrent requests; without this, an 86% per-paper
+    failure rate is what you get on a 30-day backlog catch-up run).
 """
 from __future__ import annotations
 
+import random
+import time
+
 
 _MODERN_PREFIXES = ("o1", "o3", "o4", "gpt-5")
+
+# Exponential-backoff config for 429s.
+_RATE_LIMIT_MAX_RETRIES = 6
+_RATE_LIMIT_BASE_DELAY  = 2.0   # seconds; doubled per retry, capped
+_RATE_LIMIT_MAX_DELAY   = 60.0
+
+
+def _is_rate_limit_or_transient(e: Exception) -> bool:
+    """Detect 429 and other retry-worthy errors across providers."""
+    msg = str(e).lower()
+    if "429" in msg: return True
+    if "rate limit" in msg or "ratelimit" in msg: return True
+    if "too many requests" in msg: return True
+    if "request_timeout" in msg or "read timeout" in msg: return True
+    if "connection" in msg and ("reset" in msg or "aborted" in msg or "refused" in msg):
+        return True
+    cls = type(e).__name__.lower()
+    if "ratelimit" in cls or "timeout" in cls or "apiconnection" in cls:
+        return True
+    return False
 
 
 def chat_create(client, **kwargs):
@@ -31,6 +58,27 @@ def chat_create(client, **kwargs):
         try:
             return client.chat.completions.create(**kwargs)
         except Exception as e:
+            # 429 / rate-limit / transient: exponential backoff and try again.
+            # Done at this scope (not as another `for` loop above) so a 429
+            # retry resets the parameter-migration counter, which is fine.
+            if _is_rate_limit_or_transient(e):
+                for attempt in range(_RATE_LIMIT_MAX_RETRIES):
+                    delay = min(
+                        _RATE_LIMIT_BASE_DELAY * (2 ** attempt),
+                        _RATE_LIMIT_MAX_DELAY,
+                    )
+                    delay *= 0.5 + random.random()  # ±50% jitter
+                    time.sleep(delay)
+                    try:
+                        return client.chat.completions.create(**kwargs)
+                    except Exception as inner:
+                        if _is_rate_limit_or_transient(inner):
+                            continue        # try again with longer delay
+                        e = inner            # different error — fall through
+                        break
+                # If we exhausted backoff, re-raise the last error.
+                raise e
+
             msg = str(e).lower()
 
             # max_tokens → max_completion_tokens
