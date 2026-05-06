@@ -170,6 +170,29 @@
       const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
       const r = await _fetchWithFallback(resource, init);
 
+      // Reorder file-list.txt so app.js's `availableDates[0]` is the NEWEST.
+      // app.js + flatpickr both assume newest-first, but the workflow
+      // historically wrote file-list.txt ascending. Rewriting the body here
+      // means the live site is correct on the next reload, no CI run needed.
+      if (r.ok && /\/assets\/file-list\.txt(?:$|\?)/.test(url)) {
+        try {
+          const text = await r.clone().text();
+          // Sort lines lexicographically descending. YYYY-MM-DD prefix means
+          // lex DESC === chronological DESC; entries without a date prefix
+          // sort to wherever they fall (rare in practice).
+          const lines = text.split('\n').filter(l => l.length > 0);
+          lines.sort();
+          lines.reverse();
+          return new Response(lines.join('\n') + '\n', {
+            status: r.status,
+            statusText: r.statusText,
+            headers: r.headers
+          });
+        } catch (e) {
+          console.warn('[personalization] file-list.txt rewrite failed', e);
+        }
+      }
+
       // Rewrite JSONL bodies. Two things happen here:
       //   1. Strip Chinese AI summaries when upstream fallback fires
       //      (replaces them with the original English abstract).
@@ -352,6 +375,7 @@
             <button class="hero-range-btn" data-range="90">Last 3mo</button>
             <button class="hero-range-btn" data-range="custom">Custom…</button>
           </div>
+          <div class="personal-window-indicator" id="personalWindowIndicator"></div>
         </div>
         <div class="personal-hero-side">
           <div class="hero-stat">
@@ -405,19 +429,49 @@
     return Array.isArray(v) && v.length > 0;
   }
 
-  // Wait until availableDates is populated, then call cb.
+  // Wait until availableDates is populated, then call cb. Also fix the
+  // sort order in-place: app.js + flatpickr both assume `availableDates[0]`
+  // is the NEWEST date, but the workflow historically wrote file-list.txt
+  // in ascending order so `[0]` was the oldest. Defensive re-sort.
   function _whenDatesReady(cb, attempts = 60) {
-    if (_availableDatesReady()) return cb();
+    if (_availableDatesReady()) {
+      try {
+        const arr = _readAvailableDates();
+        // Sort descending in place so [0] is newest. Idempotent — running
+        // multiple times keeps the order correct.
+        if (arr && arr.length > 1) {
+          const sortedDesc = [...arr].sort().reverse();
+          if (arr[0] !== sortedDesc[0]) {
+            arr.sort();
+            arr.reverse();
+            console.info(`[personalization] re-sorted availableDates DESC; newest=${arr[0]}`);
+          }
+        }
+      } catch (e) { /* ignore */ }
+      return cb();
+    }
     if (attempts <= 0) return;
     setTimeout(() => _whenDatesReady(cb, attempts - 1), 100);
   }
 
+  function _setWindowIndicator(label, dateCount) {
+    const el = document.getElementById('personalWindowIndicator');
+    if (!el) return;
+    if (!label) { el.textContent = ''; return; }
+    const days = dateCount === 1 ? 'day' : 'days';
+    el.textContent = `Showing: ${label}${dateCount != null ? ` · ${dateCount} ${days} of data` : ''}`;
+  }
+
   function applyRange(rangeDays) {
     _whenDatesReady(() => {
+      // After the defensive sort in _whenDatesReady, dates[0] is newest.
       const dates = _readAvailableDates() || [];
       if (rangeDays === 1) {
         if (typeof window.loadPapersByDate === 'function' && dates.length) {
+          // dates[0] is now the NEWEST after the defensive DESC sort,
+          // so "Today" actually shows the latest available day.
           window.loadPapersByDate(dates[0]);
+          _setWindowIndicator(`Today (${dates[0]})`, 1);
         }
         return;
       }
@@ -428,6 +482,10 @@
         // Window had no dates with data — fall back to the newest available.
         if (typeof window.loadPapersByDate === 'function' && dates.length) {
           window.loadPapersByDate(dates[0]);
+          _setWindowIndicator(
+            `Last ${rangeDays}d window had no data — showing newest available (${dates[0]})`,
+            1
+          );
         }
         return;
       }
@@ -435,6 +493,12 @@
       const endEffective   = inRange[inRange.length - 1];
       if (typeof window.loadPapersByDateRange === 'function') {
         window.loadPapersByDateRange(startEffective, endEffective);
+        const label = rangeDays >= 30 ? `Last ${Math.round(rangeDays/30)}mo`
+                    : `Last ${rangeDays}d`;
+        _setWindowIndicator(
+          `${label} (${startEffective} → ${endEffective})`,
+          inRange.length
+        );
       }
     });
   }

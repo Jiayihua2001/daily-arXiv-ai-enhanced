@@ -247,6 +247,15 @@ header {
   border-color: transparent;
   box-shadow: 0 6px 14px -6px rgba(79,70,229,0.5);
 }
+.personal-window-indicator {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--p-indigo);
+  opacity: 0.8;
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+  letter-spacing: 0.1px;
+}
+.personal-window-indicator:empty { display: none; }
 @keyframes chipPulse {
   0%   { box-shadow: 0 0 0 0 rgba(79,70,229,0.5); }
   70%  { box-shadow: 0 0 0 10px rgba(79,70,229,0); }

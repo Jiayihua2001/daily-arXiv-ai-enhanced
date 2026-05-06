@@ -449,7 +449,11 @@ jobs:
         # Rebuild file-list AFTER merging today's files with whatever is
         # already on the data branch — otherwise we'd publish a list with
         # only today's file and the frontend would lose access to history.
-        ls data/*.jsonl 2>/dev/null | sed 's|data/||' | sort > assets/file-list.txt
+        # DESC chronological so app.js's `availableDates[0]` is the NEWEST
+        # date — fixes the default-load and the "Today" button which both
+        # use `[0]` to mean "newest". The flatpickr's `<= availableDates[0]`
+        # filter also expects newest-first.
+        ls data/*.jsonl 2>/dev/null | sed 's|data/||' | sort -r > assets/file-list.txt
         echo "📜 file-list.txt now contains $(wc -l < assets/file-list.txt | tr -d ' ') entries"
 
         # Rebuild seen_ids.txt — source of truth for what's been processed.
