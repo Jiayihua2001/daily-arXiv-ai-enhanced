@@ -1,0 +1,21 @@
+{
+  "topics": [
+    {
+      "slug": "mcsp",
+      "title": "Molecular Crystal Structure Prediction",
+      "summary": "Predicting all the ways a molecule can pack into a crystal, ranked by stability — before anyone has grown the crystal in a lab.",
+      "tags": ["csp", "polymorphism", "computational-chemistry"],
+      "status": "working-draft",
+      "last_updated": "2026-05-06"
+    },
+    {
+      "slug": "genetic-algorithm-csp",
+      "title": "Genetic Algorithms for MCSP",
+      "summary": "How evolutionary search became the default candidate-generation engine for organic-molecular CSP — and where it's losing ground to generative ML.",
+      "tags": ["csp", "genetic-algorithm", "polymorphism"],
+      "status": "working-draft",
+      "last_updated": "2026-05-06",
+      "parent_topic": "mcsp"
+    }
+  ]
+}

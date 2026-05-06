@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Field guides — curated primers on MCSP, AI4Sci, and adjacent topics">
+    <title>Field guides · Daily arXiv</title>
+    <link rel="icon" type="image/png" href="assets/logo2-removebg-preview.png">
+    <link rel="stylesheet" href="css/claude.css?v=20260504">
+    <link rel="stylesheet" href="css/topics.css?v=20260506">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+Pro:wght@400;500;600&display=swap">
+    <!-- markdown rendering + sanitization -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+
+    <script src="js/auth-config.js"></script>
+    <script src="js/auth.js"></script>
+    <script>
+        Auth.requireAuth();
+        document.addEventListener('DOMContentLoaded', function () {
+            const logoutButton = document.getElementById('logoutButton');
+            if (logoutButton && Auth.isPasswordEnabled()) logoutButton.style.display = '';
+        });
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <div class="header-content">
+                <div class="header-left">
+                    <a href="https://github.com/Jiayihua2001/daily-arXiv-ai-enhanced" target="_blank" class="github-button">
+                        <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+                        </svg>
+                        <span class="github-text">Source</span>
+                    </a>
+                </div>
+
+                <div class="header-center">
+                    <a href="index.html" class="site-logo">
+                        <span class="site-title">Daily arXiv</span>
+                        <span class="site-title-suffix">MCSP × AI4Sci</span>
+                    </a>
+                </div>
+
+                <div class="header-controls">
+                    <a href="index.html" class="back-button" title="Back to feed">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M20 11H7.83L13.42 5.41L12 4L4 12L12 20L13.41 18.59L7.83 13H20V11Z" fill="currentColor"/>
+                        </svg>
+                    </a>
+                    <button id="logoutButton" onclick="Auth.logout()" class="icon-button" title="Sign out" style="display: none;">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.59L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z" fill="currentColor"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="topics-page">
+            <section class="subpage-head">
+                <span class="eyebrow">Field guides</span>
+                <h1>Curated primers on the topics that matter to your work.</h1>
+                <p class="lede">
+                    Background, methods landscape, core papers, and open questions —
+                    each guide is a working draft. Click a topic on the left to read its full primer.
+                </p>
+            </section>
+
+            <div class="topics-layout">
+                <aside class="topics-sidebar">
+                    <h3 class="topics-sidebar-heading">Topics</h3>
+                    <div id="topicsList" class="topics-list">
+                        <div class="topics-loading">Loading…</div>
+                    </div>
+                    <div class="topics-meta-footer">
+                        <p>Add a new topic by dropping a markdown file into <code>topics/</code> and adding an entry to <code>topics/index.json</code>. The wiki agent in your Jade vault can draft these from your accumulated source pages.</p>
+                    </div>
+                </aside>
+
+                <article class="topics-article" id="topicsArticle">
+                    <div class="topics-loading">Pick a topic from the left to begin.</div>
+                </article>
+            </div>
+        </main>
+
+        <footer>
+            <div class="footer-content">
+                <p>Source on <a href="https://github.com/Jiayihua2001/daily-arXiv-ai-enhanced" target="_blank">GitHub</a>.</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="js/topics.js?v=20260506"></script>
+</body>
+</html>
