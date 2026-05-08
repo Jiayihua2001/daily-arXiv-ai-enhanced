@@ -57,11 +57,16 @@ SCREEN_MIN_SIGNIFICANCE = int(os.environ.get("SCREEN_MIN_SIGNIFICANCE", "4"))
 # Always keep a paper that scores >= this on relevance even if significance is low
 # (a foundational paper in our area is worth showing even if "incremental").
 SCREEN_RELEVANCE_AUTOKEEP = int(os.environ.get("SCREEN_RELEVANCE_AUTOKEEP", "8"))
-# Hard relevance floor for the safety-floor pullback: papers below this get
-# DROPPED even if dropping would push us past SCREEN_MAX_DROP_RATIO. This
-# stops obvious off-topic papers (medical AI, geophysics, etc., scoring r=2)
-# from being readmitted just because the LLM was strict that day.
-SCREEN_HARD_REL_FLOOR   = int(os.environ.get("SCREEN_HARD_REL_FLOOR", "4"))
+# Hard relevance floor for the safety-floor pullback: papers BELOW this are
+# NEVER readmitted, even when more than SCREEN_MAX_DROP_RATIO of items would
+# otherwise be dropped. Default = SCREEN_MIN_RELEVANCE so the safety floor
+# honors the same bar as the per-paper threshold — i.e., a sparse-keyword
+# day publishes a tiny feed (or empty) rather than padding with rel<min
+# papers. Set explicitly to a lower value (e.g. 4) to restore the older
+# permissive behavior that pulled borderline-relevant papers back in.
+SCREEN_HARD_REL_FLOOR   = int(os.environ.get(
+    "SCREEN_HARD_REL_FLOOR", str(SCREEN_MIN_RELEVANCE)
+))
 # Floor: never drop more than 90% of input — if the LLM is being too strict
 # we'd rather show borderline papers than nothing. Pullback respects
 # SCREEN_HARD_REL_FLOOR.

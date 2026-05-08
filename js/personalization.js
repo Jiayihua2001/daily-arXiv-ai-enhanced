@@ -98,11 +98,26 @@
   // only thing we still drop on upstream-fallback feeds is items that don't
   // match any user keyword — there the data isn't tailored to MCSP at all.
   // We always rewrite Chinese AI summaries to English abstracts.
+  //
+  // Relevance gate: papers with screen.relevance <= MIN_RELEVANCE_FRONTEND
+  // are dropped on the OWN feed. The pipeline now also enforces this
+  // (SCREEN_HARD_REL_FLOOR tracks SCREEN_MIN_RELEVANCE), but applying it
+  // client-side too means already-published days that pre-date the
+  // pipeline fix don't show low-relevance noise. Override via localStorage:
+  //   localStorage.setItem('minRelevanceFrontend', '4')   // looser
+  //   localStorage.setItem('minRelevanceFrontend', '7')   // stricter
+  function _minRelevanceFrontend() {
+    const v = parseInt(localStorage.getItem('minRelevanceFrontend') || '6', 10);
+    return Number.isFinite(v) ? v : 6;
+  }
+
   function _processJsonlForUser(text, keywords, isUserOwnFeed) {
-    if (!text) return { text, kept: null, total: null };
+    if (!text) return { text, kept: null, total: null, droppedByRelevance: 0 };
+    const minRel = _minRelevanceFrontend();
     const lines = text.split('\n');
     const out = [];
     let total = 0;
+    let droppedByRelevance = 0;
     for (const line of lines) {
       if (!line.trim()) continue;
       total++;
@@ -117,6 +132,18 @@
           pdf: cleaned.pdf || null,
           source: cleaned.source || (cleaned.id.match(/^[a-z]+:/) ? cleaned.id.split(':')[0] : 'arxiv')
         });
+      }
+
+      // Relevance gate (own feed only — fallback feed has no screen scores).
+      if (isUserOwnFeed) {
+        const rel = (cleaned.screen || {}).relevance;
+        // Drop if scored AND below threshold. Unscored items pass through
+        // (the pipeline's per-paper failure-rate guard catches systemic
+        // unscoring; an isolated unscored item is rare enough to show.)
+        if (typeof rel === 'number' && rel < minRel) {
+          droppedByRelevance++;
+          continue;
+        }
       }
 
       // Hard filter ONLY on the upstream-fallback feed (which is generic
@@ -135,7 +162,12 @@
       }
       out.push(JSON.stringify(cleaned));
     }
-    return { text: out.join('\n'), kept: out.length, total: total };
+    return {
+      text: out.join('\n'),
+      kept: out.length,
+      total: total,
+      droppedByRelevance: droppedByRelevance,
+    };
   }
 
   function _looksLikeJsonlData(url) {
@@ -208,14 +240,19 @@
           const isUserOwnData = url.startsWith(primaryBase);
           const result = _processJsonlForUser(text, kws, isUserOwnData);
 
+          const droppedRel = result.droppedByRelevance || 0;
           console.info(
             `[personalization] feed=${isUserOwnData ? 'own' : 'fallback'}` +
             ` total=${result.total} kept=${result.kept}` +
-            (isUserOwnData ? ' (own feed: no client filter, all kept)' : '')
+            (droppedRel > 0
+              ? ` (dropped ${droppedRel} papers with rel<${_minRelevanceFrontend()};` +
+                ` override via localStorage.minRelevanceFrontend)`
+              : '')
           );
           window.__personalizationLastFilter = {
             kept: result.kept,
             total: result.total,
+            droppedByRelevance: droppedRel,
             clientFilterApplied: !isUserOwnData,
             feed: isUserOwnData ? 'own' : 'fallback',
             date: new Date().toISOString()
