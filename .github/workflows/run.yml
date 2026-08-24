@@ -4,8 +4,13 @@
 name: arXiv-daily-ai-enhanced
 
 on:
-  schedule:
-    - cron: "30 1 * * *"
+  # Schedule disabled 2026-08-24: every LLM call has failed since 2026-07-26
+  # (OpenAI-compatible endpoint rejecting; likely insufficient_quota), and the
+  # retry storm pushed every run into GitHub's 6-hour timeout ("cancelled").
+  # This project is being merged into csp-digest (Anthropic-based); manual
+  # runs remain available via workflow_dispatch.
+  # schedule:
+  #   - cron: "30 1 * * *"
   workflow_dispatch:
 
 # Allow the GITHUB_TOKEN to push commits/branches back to this repo
